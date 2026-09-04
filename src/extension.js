@@ -162,6 +162,11 @@ async function testDraftCapture({ vscode, output }) {
     });
   } catch (error) {
     output.appendLine(`[draft capture] FAILED — ${error.stack || error.message}`);
+    if (error.captureDiagnostics) {
+      output.appendLine('[draft capture] accessibility diagnostics:');
+      output.appendLine(JSON.stringify(error.captureDiagnostics, null, 2));
+      output.show(true);
+    }
     vscode.window.showErrorMessage(`Codex Scheduler draft capture failed: ${error.message}`);
   }
 }
