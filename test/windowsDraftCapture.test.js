@@ -2,7 +2,11 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isWslEnvironment } = require('../src/platform/windowsDraftCapture');
+const {
+  isWslEnvironment,
+  parseUiaInspection,
+  summarizeElement,
+} = require('../src/platform/windowsDraftCapture');
 
 test('detects WSL from environment variables', () => {
   assert.equal(isWslEnvironment({
@@ -26,4 +30,28 @@ test('does not treat ordinary Linux as WSL', () => {
     env: {},
     procVersion: 'Linux version 6.8.0-generic',
   }), false);
+});
+
+test('parses UI Automation capture results without changing the text', () => {
+  const result = parseUiaInspection(JSON.stringify({
+    ok: true,
+    text: 'line one\nline two',
+    pattern: 'TextPattern',
+  }));
+  assert.equal(result.ok, true);
+  assert.equal(result.text, 'line one\nline two');
+  assert.equal(result.pattern, 'TextPattern');
+});
+
+test('summarizes the focused accessibility control for diagnostics', () => {
+  const text = summarizeElement({
+    controlType: 'ControlType.Edit',
+    className: 'CodexComposer',
+    automationId: 'prompt-input',
+    name: 'Message Codex',
+  });
+  assert.match(text, /ControlType\.Edit/);
+  assert.match(text, /CodexComposer/);
+  assert.match(text, /prompt-input/);
+  assert.match(text, /Message Codex/);
 });
