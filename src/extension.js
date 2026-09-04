@@ -35,7 +35,7 @@ async function recoverInterruptedJobs(store, output) {
       return {
         ...job,
         status: 'failed',
-        lastError: 'VS Code restarted during turn submission. Automatic retry was suppressed to avoid a duplicate prompt; inspect the target Codex thread before retrying manually.',
+        lastError: 'VS Code restarted while adding this prompt to the Codex queue. Automatic retry was suppressed to avoid a duplicate queued message; inspect the target Codex thread/queue before retrying manually.',
       };
     }
     return job;
@@ -196,7 +196,6 @@ function statusIcon(status) {
     case 'checking': return '$(sync~spin)';
     case 'submitting': return '$(send)';
     case 'submitted': return '$(check)';
-    case 'completed': return '$(pass-filled)';
     case 'failed': return '$(error)';
     case 'cancelled': return '$(circle-slash)';
     default: return '$(question)';
@@ -253,6 +252,18 @@ async function diagnose({ vscode, codex, output }) {
     output.appendLine(`VS Code Codex threads found: ${threads.length}`);
     for (const thread of threads.slice(0, 10)) {
       output.appendLine(`  - ${thread.id} | ${thread.status?.type || 'unknown'} | ${thread.name || preview(thread.preview, 100)}`);
+    }
+
+    if (threads.length > 0) {
+      const queueSupport = await codex.checkQueueSupport(threads[0].id);
+      if (queueSupport.supported) {
+        output.appendLine('Native queued-turn API: OK');
+      } else {
+        const prefix = queueSupport.definitivelyUnsupported ? 'UNSUPPORTED' : 'FAILED';
+        output.appendLine(`Native queued-turn API: ${prefix} — ${queueSupport.error?.message || 'unknown error'}`);
+      }
+    } else {
+      output.appendLine('Native queued-turn API: NOT CHECKED (no VS Code thread available)');
     }
   } catch (error) {
     output.appendLine(`Thread listing: FAILED — ${error.stack || error.message}`);

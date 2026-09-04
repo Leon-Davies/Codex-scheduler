@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 
-const TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'failed', 'submitted']);
+const TERMINAL_STATUSES = new Set(['cancelled', 'failed', 'submitted']);
 
 function createJob({ prompt, thread, workspace, trigger, nextAttemptAt }) {
   const now = Date.now();
@@ -19,9 +19,9 @@ function createJob({ prompt, thread, workspace, trigger, nextAttemptAt }) {
     nextAttemptAt: nextAttemptAt ?? now,
     attempts: 0,
     lastError: null,
-    submittedTurnId: null,
+    queuedSubmissionId: null,
+    clientUserMessageId: null,
     submittedAt: null,
-    completedAt: null,
   };
 }
 

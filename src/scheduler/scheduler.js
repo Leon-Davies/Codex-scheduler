@@ -1,6 +1,7 @@
 'use strict';
 
 const { AppServerError } = require('../codex/appServer');
+const { isQueueUnsupportedError } = require('../codex/service');
 const { getNextResetMs, isUsageClearlyBlocked } = require('../codex/rateLimits');
 const { isRunnable } = require('./jobs');
 
@@ -74,56 +75,47 @@ class Scheduler {
       });
       this.onJobsChanged?.();
 
-      if (job.trigger?.type === 'usageReset') {
-        const limits = await this.codex.getRateLimits();
-        if (isUsageClearlyBlocked(limits)) {
-          await this.#rescheduleForLimits(job, limits, 'Codex still reports the usage limit as active.');
-          return;
-        }
-      }
-
-      // Best-effort safety check. App-server status is useful but is not an atomic
-      // cross-client lock, so we still avoid sending if our connection sees activity.
-      const thread = await this.codex.readThread(job.threadId);
-      if (thread?.status?.type === 'active') {
-        await this.#defer(job, 60_000, 'Target thread is currently active; deferred rather than steering it.');
+      // A fixed-time job means "not before this time". If Codex is still usage-
+      // blocked at that point, waiting for the actual reset is safer than starting
+      // a turn that the provider will immediately reject.
+      const limits = await this.codex.getRateLimits();
+      if (isUsageClearlyBlocked(limits)) {
+        await this.#rescheduleForLimits(job, limits, 'Codex still reports the usage limit as active.');
         return;
       }
 
       await this.store.update(job.id, { status: 'submitting' });
       this.onJobsChanged?.();
-      const submission = await this.codex.submitTurn(job.threadId, job.prompt);
 
-      // Once turn/start returns a turn id, never automatically submit this job again.
+      // The job ID is also the stable client message ID. The Codex native queue is
+      // durable and cross-process aware, so we do not resume or take ownership of
+      // the thread. The official VS Code Codex process can dispatch this queued
+      // message once its existing thread is idle.
+      const queuedSubmission = await this.codex.queueTurn(job.threadId, job.prompt, job.id);
+
+      // Once thread/queue/add returns an ID, never automatically enqueue this job
+      // again. The native Codex queue now owns delivery to the existing thread.
       await this.store.update(job.id, {
         status: 'submitted',
-        submittedTurnId: submission.turn.id,
+        queuedSubmissionId: queuedSubmission.id,
+        clientUserMessageId: queuedSubmission.clientUserMessageId || job.id,
         submittedAt: Date.now(),
         lastError: null,
       });
       this.onJobsChanged?.();
-      this.output.appendLine(`[scheduler] submitted ${job.id} to ${job.threadId} as ${submission.turn.id}`);
-      void this.vscode.window.showInformationMessage(
-        `Codex Scheduler sent a prompt to ${job.threadLabel}.`,
+      this.output.appendLine(
+        `[scheduler] queued ${job.id} for ${job.threadId} as ${queuedSubmission.id}`,
       );
-
-      submission.completion
-        .then(async (params) => {
-          const completedTurn = params.turn || {};
-          await this.store.update(job.id, {
-            status: 'completed',
-            completedAt: Date.now(),
-            completionStatus: completedTurn.status || 'completed',
-          });
-          this.onJobsChanged?.();
-          this.output.appendLine(`[scheduler] turn ${submission.turn.id} completed (${completedTurn.status || 'unknown'}).`);
-        })
-        .catch((error) => {
-          this.output.appendLine(`[scheduler] completion watch ended: ${error.message}`);
-        });
+      void this.vscode.window.showInformationMessage(
+        `Codex Scheduler queued your prompt for ${job.threadLabel}. Codex will start it when that thread is idle.`,
+      );
     } catch (error) {
-      if (error?.code === 'THREAD_ACTIVE') {
-        await this.#defer(job, 60_000, error.message);
+      if (isQueueUnsupportedError(error)) {
+        const message = 'This Codex build does not expose the native queued-turn API required for safe scheduling. Update the official OpenAI Codex extension, then run Codex Scheduler diagnostics again.';
+        await this.store.update(job.id, { status: 'failed', lastError: message });
+        this.onJobsChanged?.();
+        this.output.appendLine(`[scheduler] job ${job.id} failed: ${message} (${error.message})`);
+        void this.vscode.window.showErrorMessage(`Codex Scheduler: ${message}`);
       } else if (looksLikeUsageLimitError(error)) {
         try {
           const limits = await this.codex.getRateLimits();

@@ -58,7 +58,10 @@ class CodexAppServer extends EventEmitter {
       clientInfo: {
         name: 'codex_scheduler',
         title: 'Codex Scheduler VS Code Extension',
-        version: '0.0.1',
+        version: '0.0.2',
+      },
+      capabilities: {
+        experimentalApi: true,
       },
     });
     this.notify('initialized', {});

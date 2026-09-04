@@ -4,6 +4,17 @@ const path = require('path');
 const { CodexAppServer } = require('./appServer');
 const { discoverCodexExecutable } = require('./executableDiscovery');
 
+function isQueueUnsupportedError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return error?.code === -32601 || (
+    error?.code === -32600 && (
+      message.includes('experimental') ||
+      message.includes('unknown variant `thread/queue/') ||
+      message.includes('user message queue is unavailable')
+    )
+  );
+}
+
 class CodexService {
   constructor({ vscode, output }) {
     this.vscode = vscode;
@@ -13,11 +24,15 @@ class CodexService {
   }
 
   async ensureClient() {
-    if (this.client && !this.client.closed) return this.client;
+    if (this.client && !this.client.closed) {
+      return this.client;
+    }
 
     this.executable = discoverCodexExecutable(this.vscode);
     if (!this.executable) {
-      throw new Error('Could not find the Codex executable. Install/enable the official OpenAI Codex extension, add Codex to PATH, or set codexScheduler.codexCommand.');
+      throw new Error(
+        'Could not find the Codex executable. Install/enable the official OpenAI Codex extension, add Codex to PATH, or set codexScheduler.codexCommand.',
+      );
     }
 
     const workspace = this.vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -28,7 +43,9 @@ class CodexService {
       output: this.output,
     });
     this.client.on('serverRequest', (request) => {
-      this.output.appendLine(`[codex] turn needs client interaction: ${request.method}. Codex Scheduler does not auto-approve requests.`);
+      this.output.appendLine(
+        `[codex] turn needs client interaction: ${request.method}. Codex Scheduler does not auto-approve requests.`,
+      );
     });
     await this.client.start();
     return this.client;
@@ -49,50 +66,63 @@ class CodexService {
       sourceKinds: ['vscode'],
       archived: false,
     };
-    if (cwd) params.cwd = cwd;
+    if (cwd) {
+      params.cwd = cwd;
+    }
     const response = await client.request('thread/list', params);
     return Array.isArray(response?.data) ? response.data : [];
   }
 
   async readThread(threadId) {
     const client = await this.ensureClient();
-    const response = await client.request('thread/read', { threadId, includeTurns: false });
+    const response = await client.request('thread/read', {
+      threadId,
+      includeTurns: false,
+    });
     return response?.thread || null;
   }
 
-  async submitTurn(threadId, prompt) {
+  async listQueue(threadId, limit = 20) {
     const client = await this.ensureClient();
-    const resumed = await client.request('thread/resume', { threadId });
-    const thread = resumed?.thread;
-    if (!thread?.id) throw new Error(`Codex did not resume thread ${threadId}.`);
+    return client.request('thread/queue/list', {
+      threadId,
+      cursor: null,
+      limit,
+    });
+  }
 
-    if (thread.status?.type === 'active') {
-      const flags = Array.isArray(thread.status.activeFlags) ? ` (${thread.status.activeFlags.join(', ')})` : '';
-      const error = new Error(`Target Codex thread is active${flags}; scheduled prompt was not injected.`);
-      error.code = 'THREAD_ACTIVE';
-      throw error;
-    }
-
-    const response = await client.request('turn/start', {
+  async queueTurn(threadId, prompt, clientUserMessageId) {
+    const client = await this.ensureClient();
+    const response = await client.request('thread/queue/add', {
       threadId,
       input: [{ type: 'text', text: prompt }],
+      clientUserMessageId,
     });
-    const turn = response?.turn;
-    if (!turn?.id) throw new Error('Codex accepted turn/start without returning a turn id.');
+    const queuedSubmission = response?.queuedSubmission;
+    if (!queuedSubmission?.id) {
+      throw new Error('Codex accepted thread/queue/add without returning a queued submission id.');
+    }
+    return queuedSubmission;
+  }
 
-    return {
-      thread,
-      turn,
-      completion: client.waitForNotification(
-        'turn/completed',
-        (params) => params.threadId === threadId && params.turn?.id === turn.id,
-      ),
-    };
+  async checkQueueSupport(threadId) {
+    try {
+      await this.listQueue(threadId, 1);
+      return { supported: true, error: null };
+    } catch (error) {
+      return {
+        supported: false,
+        definitivelyUnsupported: isQueueUnsupportedError(error),
+        error,
+      };
+    }
   }
 
   getWorkspaceCwd() {
     const folders = this.vscode.workspace.workspaceFolders;
-    if (!folders || folders.length === 0) return null;
+    if (!folders || folders.length === 0) {
+      return null;
+    }
     return path.normalize(folders[0].uri.fsPath);
   }
 
@@ -102,4 +132,7 @@ class CodexService {
   }
 }
 
-module.exports = { CodexService };
+module.exports = {
+  CodexService,
+  isQueueUnsupportedError,
+};
