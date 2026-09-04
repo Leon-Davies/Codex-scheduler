@@ -2,7 +2,7 @@
 
 const vscode = require('vscode');
 const { CodexService } = require('./codex/service');
-const { discoverCodexExecutable } = require('./codex/executableDiscovery');
+const { discoverCodexCandidates, discoverCodexExecutable } = require('./codex/executableDiscovery');
 const { summarizeRateLimits } = require('./codex/rateLimits');
 const { JobStore } = require('./scheduler/jobStore');
 const { isPending } = require('./scheduler/jobs');
@@ -214,13 +214,18 @@ async function diagnose({ vscode, codex, output }) {
   const official = vscode.extensions.getExtension('openai.chatgpt');
   output.appendLine(`Official Codex extension: ${official ? `${official.packageJSON.version || 'installed'} at ${official.extensionPath}` : 'not found'}`);
 
-  const executable = discoverCodexExecutable(vscode);
-  if (!executable) {
+  const candidates = discoverCodexCandidates(vscode);
+  if (candidates.length === 0) {
     output.appendLine('Codex executable: NOT FOUND');
     vscode.window.showErrorMessage('Codex Scheduler diagnostics: Codex executable was not found. See the output panel.');
     return;
   }
-  output.appendLine(`Codex executable: ${executable.command}`);
+  output.appendLine('Codex runtime candidates (in preference order):');
+  for (const [index, candidate] of candidates.entries()) {
+    output.appendLine(`  ${index + 1}. ${candidate.command} (${candidate.source})`);
+  }
+  const executable = discoverCodexExecutable(vscode);
+  output.appendLine(`Selected Codex executable: ${executable.command}`);
   output.appendLine(`Discovery source: ${executable.source}`);
 
   try {
