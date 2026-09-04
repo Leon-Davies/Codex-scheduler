@@ -69,34 +69,44 @@ function scanForCodexExecutable(root, platform = process.platform, maxDepth = 5)
   return matches[0] || null;
 }
 
-function discoverCodexExecutable(vscode) {
+function orderCodexCandidates({ configured, bundled, pathCommand }) {
+  if (configured) {
+    return [{ command: configured, source: 'setting' }];
+  }
+
+  const ordered = [];
+  if (bundled) {
+    ordered.push({ command: bundled, source: 'openai.chatgpt bundle' });
+  }
+  if (pathCommand && pathCommand !== bundled) {
+    ordered.push({ command: pathCommand, source: 'PATH' });
+  }
+  return ordered;
+}
+
+function discoverCodexCandidates(vscode) {
   const configured = vscode.workspace
     .getConfiguration('codexScheduler')
     .get('codexCommand', '')
     .trim();
 
-  if (configured) {
-    return { command: configured, source: 'setting' };
-  }
-
-  const fromPath = findOnPath();
-  if (fromPath) {
-    return { command: fromPath, source: 'PATH' };
-  }
-
   const officialExtension = vscode.extensions.getExtension('openai.chatgpt');
-  if (officialExtension) {
-    const bundled = scanForCodexExecutable(officialExtension.extensionPath);
-    if (bundled) {
-      return { command: bundled, source: 'openai.chatgpt bundle' };
-    }
-  }
+  const bundled = officialExtension
+    ? scanForCodexExecutable(officialExtension.extensionPath)
+    : null;
+  const pathCommand = findOnPath();
 
-  return null;
+  return orderCodexCandidates({ configured, bundled, pathCommand });
+}
+
+function discoverCodexExecutable(vscode) {
+  return discoverCodexCandidates(vscode)[0] || null;
 }
 
 module.exports = {
+  discoverCodexCandidates,
   discoverCodexExecutable,
   findOnPath,
+  orderCodexCandidates,
   scanForCodexExecutable,
 };
