@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test-and-package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Test
+        run: npm test
+      - name: Package VSIX
+        run: npx -y @vscode/vsce package --out codex-scheduler.vsix
+      - name: Upload VSIX
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-scheduler-vsix
+          path: codex-scheduler.vsix
+          if-no-files-found: error
