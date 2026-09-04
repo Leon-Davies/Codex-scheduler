@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  buildUiaInspectionScript,
   isWslEnvironment,
   parseUiaInspection,
   summarizeElement,
@@ -54,4 +55,13 @@ test('summarizes the focused accessibility control for diagnostics', () => {
   assert.match(text, /CodexComposer/);
   assert.match(text, /prompt-input/);
   assert.match(text, /Message Codex/);
+});
+
+test('UI Automation script searches descendants and never synthesizes keys', () => {
+  const script = buildUiaInspectionScript();
+  assert.match(script, /TreeScope\]::Descendants/);
+  assert.match(script, /ControlType\.Edit/);
+  assert.match(script, /ValuePattern/);
+  assert.match(script, /TextPattern/);
+  assert.doesNotMatch(script, /SendKeys/i);
 });
