@@ -44,15 +44,27 @@ Add-Type -AssemblyName UIAutomationTypes
 
 function Describe-Element([System.Windows.Automation.AutomationElement]$Element) {
   if ($null -eq $Element) { return $null }
-  $current = $Element.Current
-  return [ordered]@{
-    name = [string]$current.Name
-    automationId = [string]$current.AutomationId
-    className = [string]$current.ClassName
-    controlType = [string]$current.ControlType.ProgrammaticName
-    processId = [int]$current.ProcessId
-    isKeyboardFocusable = [bool]$current.IsKeyboardFocusable
-    hasKeyboardFocus = [bool]$current.HasKeyboardFocus
+  try {
+    $current = $Element.Current
+    $rect = $current.BoundingRectangle
+    return [ordered]@{
+      name = [string]$current.Name
+      automationId = [string]$current.AutomationId
+      className = [string]$current.ClassName
+      controlType = [string]$current.ControlType.ProgrammaticName
+      processId = [int]$current.ProcessId
+      isKeyboardFocusable = [bool]$current.IsKeyboardFocusable
+      hasKeyboardFocus = [bool]$current.HasKeyboardFocus
+      isOffscreen = [bool]$current.IsOffscreen
+      bounding = [ordered]@{
+        x = [math]::Round([double]$rect.X, 1)
+        y = [math]::Round([double]$rect.Y, 1)
+        width = [math]::Round([double]$rect.Width, 1)
+        height = [math]::Round([double]$rect.Height, 1)
+      }
+    }
+  } catch {
+    return [ordered]@{ error = $_.Exception.Message }
   }
 }
 
@@ -82,60 +94,166 @@ function Read-ElementText([System.Windows.Automation.AutomationElement]$Element)
   return $null
 }
 
+function Score-Candidate($Description, $Read, [int]$SearchDepth) {
+  if ($null -eq $Description -or $null -eq $Read) { return -1000 }
+  $score = 0
+  $type = [string]$Description.controlType
+  $name = [string]$Description.name
+  $automationId = [string]$Description.automationId
+  $className = [string]$Description.className
+  $length = ([string]$Read.text).Length
+
+  if ($type -eq 'ControlType.Edit') { $score += 140 }
+  elseif ($type -eq 'ControlType.Document') { $score += 75 }
+  elseif ($type -eq 'ControlType.Text') { $score += 20 }
+
+  if ([bool]$Description.hasKeyboardFocus) { $score += 120 }
+  if ([bool]$Description.isKeyboardFocusable) { $score += 55 }
+  if (-not [bool]$Description.isOffscreen) { $score += 10 } else { $score -= 100 }
+
+  $identity = "$name $automationId $className"
+  if ($identity -match '(?i)prompt|message|ask|composer|input|textarea|editor|codex|chat') { $score += 45 }
+  if ($identity -match '(?i)history|conversation|transcript|messages-list') { $score -= 70 }
+
+  if ($length -gt 0 -and $length -le 20000) { $score += 15 }
+  elseif ($length -gt 50000) { $score -= 80 }
+
+  # Prefer the focused pane itself over progressively broader ancestors.
+  $score -= ($SearchDepth * 8)
+  return $score
+}
+
+function Inspect-Subtree([System.Windows.Automation.AutomationElement]$Root, [int]$SearchDepth) {
+  $found = @()
+  if ($null -eq $Root) { return $found }
+
+  try {
+    $all = $Root.FindAll(
+      [System.Windows.Automation.TreeScope]::Descendants,
+      [System.Windows.Automation.Condition]::TrueCondition
+    )
+  } catch {
+    return $found
+  }
+
+  $count = [math]::Min($all.Count, 600)
+  for ($i = 0; $i -lt $count; $i++) {
+    try {
+      $element = $all.Item($i)
+      $read = Read-ElementText $element
+      if ($null -eq $read -or [string]::IsNullOrWhiteSpace([string]$read.text)) { continue }
+      $description = Describe-Element $element
+      $score = Score-Candidate $description $read $SearchDepth
+      $found += [ordered]@{
+        score = [int]$score
+        searchDepth = [int]$SearchDepth
+        element = $description
+        pattern = [string]$read.pattern
+        readableLength = ([string]$read.text).Length
+        text = [string]$read.text
+      }
+    } catch {}
+  }
+  return $found
+}
+
+function Diagnostic-Candidate($Candidate) {
+  if ($null -eq $Candidate) { return $null }
+  return [ordered]@{
+    score = [int]$Candidate.score
+    searchDepth = [int]$Candidate.searchDepth
+    element = $Candidate.element
+    pattern = [string]$Candidate.pattern
+    readableLength = [int]$Candidate.readableLength
+  }
+}
+
 $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
 if ($null -eq $focused) {
-  [ordered]@{ ok = $false; error = 'Windows UI Automation did not report a focused element.' } | ConvertTo-Json -Compress -Depth 8
+  [ordered]@{ ok = $false; error = 'Windows UI Automation did not report a focused element.' } | ConvertTo-Json -Compress -Depth 10
   exit 0
 }
 
 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $current = $focused
-$depth = 0
 $ancestors = @()
-$match = $null
+$candidates = @()
+$searchDepth = 0
 
-while ($null -ne $current -and $depth -lt 10) {
+while ($null -ne $current -and $searchDepth -lt 5) {
   $description = Describe-Element $current
-  $read = Read-ElementText $current
+  $directRead = Read-ElementText $current
   $ancestors += [ordered]@{
-    depth = $depth
+    depth = [int]$searchDepth
     element = $description
-    readablePattern = if ($null -ne $read) { $read.pattern } else { $null }
-    readableLength = if ($null -ne $read) { ([string]$read.text).Length } else { 0 }
+    readablePattern = if ($null -ne $directRead) { [string]$directRead.pattern } else { $null }
+    readableLength = if ($null -ne $directRead) { ([string]$directRead.text).Length } else { 0 }
   }
 
-  if ($null -eq $match -and $null -ne $read -and -not [string]::IsNullOrWhiteSpace([string]$read.text)) {
-    $match = [ordered]@{
+  if ($null -ne $directRead -and -not [string]::IsNullOrWhiteSpace([string]$directRead.text)) {
+    $score = Score-Candidate $description $directRead $searchDepth
+    $candidates += [ordered]@{
+      score = [int]$score
+      searchDepth = [int]$searchDepth
       element = $description
-      text = [string]$read.text
-      pattern = [string]$read.pattern
-      depth = $depth
+      pattern = [string]$directRead.pattern
+      readableLength = ([string]$directRead.text).Length
+      text = [string]$directRead.text
     }
   }
 
+  # The Codex webview may expose keyboard focus only on its Pane host while the
+  # contenteditable composer is a descendant accessibility node.
+  $candidates += Inspect-Subtree $current $searchDepth
+
+  if ($candidates.Count -gt 0) { break }
   $current = $walker.GetParent($current)
-  $depth += 1
+  $searchDepth += 1
 }
 
-if ($null -ne $match) {
-  [ordered]@{
-    ok = $true
-    text = [string]$match.text
-    pattern = [string]$match.pattern
-    focused = Describe-Element $focused
-    matched = $match.element
-    matchedDepth = [int]$match.depth
-    ancestors = $ancestors
-  } | ConvertTo-Json -Compress -Depth 8
-  exit 0
+$ordered = @($candidates | Sort-Object -Property @{Expression='score'; Descending=$true}, @{Expression='readableLength'; Descending=$false})
+$diagnostic = @()
+foreach ($candidate in ($ordered | Select-Object -First 20)) {
+  $diagnostic += Diagnostic-Candidate $candidate
+}
+
+if ($ordered.Count -gt 0) {
+  $best = $ordered[0]
+  $secondScore = if ($ordered.Count -gt 1) { [int]$ordered[1].score } else { -999 }
+  $bestType = [string]$best.element.controlType
+  $strong = ([int]$best.score -ge 100) -and (
+    $bestType -eq 'ControlType.Edit' -or
+    [bool]$best.element.hasKeyboardFocus -or
+    [bool]$best.element.isKeyboardFocusable
+  )
+  $clearLead = ([int]$best.score - $secondScore) -ge 10 -or $ordered.Count -eq 1
+
+  if ($strong -and $clearLead) {
+    [ordered]@{
+      ok = $true
+      text = [string]$best.text
+      pattern = [string]$best.pattern
+      score = [int]$best.score
+      focused = Describe-Element $focused
+      matched = $best.element
+      candidates = $diagnostic
+      ancestors = $ancestors
+    } | ConvertTo-Json -Compress -Depth 10
+    exit 0
+  }
 }
 
 [ordered]@{
   ok = $false
-  error = 'The focused Codex control did not expose editable text through Windows UI Automation.'
+  error = if ($ordered.Count -gt 0) {
+    'Windows UI Automation found text-bearing controls under the Codex pane, but could not identify the composer with enough confidence.'
+  } else {
+    'The focused Codex pane did not expose any readable descendant controls through Windows UI Automation.'
+  }
   focused = Describe-Element $focused
+  candidates = $diagnostic
   ancestors = $ancestors
-} | ConvertTo-Json -Compress -Depth 8
+} | ConvertTo-Json -Compress -Depth 10
 `;
 }
 
@@ -180,8 +298,8 @@ async function inspectFocusedControl() {
   ], {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 5000,
-    maxBuffer: 1024 * 1024,
+    timeout: 8000,
+    maxBuffer: 2 * 1024 * 1024,
   });
 
   const result = parseUiaInspection(stdout);
@@ -198,8 +316,11 @@ async function captureFocusedText() {
   }
 
   const focused = summarizeElement(result.focused);
+  const candidateSummary = Array.isArray(result.candidates) && result.candidates.length
+    ? ` Found ${result.candidates.length} readable candidate control(s); see Codex Scheduler output for details.`
+    : '';
   const error = new Error(
-    `${result.error || 'No draft text was exposed by the focused control.'} Focused control: ${focused}`,
+    `${result.error || 'No draft text was exposed by the focused control.'} Focused control: ${focused}.${candidateSummary}`,
   );
   error.captureDiagnostics = result;
   throw error;
