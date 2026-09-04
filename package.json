@@ -5,9 +5,17 @@
   "version": "0.0.1",
   "publisher": "leon-davies",
   "license": "MIT",
-  "engines": { "vscode": "^1.96.0" },
-  "categories": ["Other"],
-  "keywords": ["codex", "scheduler", "openai"],
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "codex",
+    "scheduler",
+    "openai"
+  ],
   "main": "./src/extension.js",
   "activationEvents": [
     "onStartupFinished",
@@ -19,14 +27,34 @@
   ],
   "contributes": {
     "commands": [
-      { "command": "codexScheduler.scheduleCurrentDraft", "title": "Codex Scheduler: Schedule Current Draft", "icon": "$(clock)" },
-      { "command": "codexScheduler.scheduleClipboard", "title": "Codex Scheduler: Schedule Prompt from Clipboard" },
-      { "command": "codexScheduler.manageScheduled", "title": "Codex Scheduler: Manage Scheduled Prompts" },
-      { "command": "codexScheduler.diagnose", "title": "Codex Scheduler: Diagnose Codex Integration" },
-      { "command": "codexScheduler.showUsage", "title": "Codex Scheduler: Show Codex Usage" }
+      {
+        "command": "codexScheduler.scheduleCurrentDraft",
+        "title": "Codex Scheduler: Schedule Current Draft",
+        "icon": "$(clock)"
+      },
+      {
+        "command": "codexScheduler.scheduleClipboard",
+        "title": "Codex Scheduler: Schedule Prompt from Clipboard"
+      },
+      {
+        "command": "codexScheduler.manageScheduled",
+        "title": "Codex Scheduler: Manage Scheduled Prompts"
+      },
+      {
+        "command": "codexScheduler.diagnose",
+        "title": "Codex Scheduler: Diagnose Codex Integration"
+      },
+      {
+        "command": "codexScheduler.showUsage",
+        "title": "Codex Scheduler: Show Codex Usage"
+      }
     ],
     "keybindings": [
-      { "command": "codexScheduler.scheduleCurrentDraft", "key": "ctrl+alt+s", "when": "isWindows" }
+      {
+        "command": "codexScheduler.scheduleCurrentDraft",
+        "key": "ctrl+alt+s",
+        "when": "isWindows"
+      }
     ],
     "configuration": {
       "title": "Codex Scheduler",
@@ -57,6 +85,8 @@
     "test": "node --test",
     "package": "npx -y @vscode/vsce package --out codex-scheduler.vsix"
   },
-  "files": ["src/**", "README.md", "LICENSE"],
-  "repository": { "type": "git", "url": "https://github.com/Leon-Davies/Codex-scheduler.git" }
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Leon-Davies/Codex-scheduler.git"
+  }
 }
