@@ -1,0 +1,62 @@
+{
+  "name": "codex-scheduler",
+  "displayName": "Codex Scheduler",
+  "description": "Schedule prompts into existing OpenAI Codex conversations from VS Code.",
+  "version": "0.0.1",
+  "publisher": "leon-davies",
+  "license": "MIT",
+  "engines": { "vscode": "^1.96.0" },
+  "categories": ["Other"],
+  "keywords": ["codex", "scheduler", "openai"],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:codexScheduler.scheduleCurrentDraft",
+    "onCommand:codexScheduler.scheduleClipboard",
+    "onCommand:codexScheduler.manageScheduled",
+    "onCommand:codexScheduler.diagnose",
+    "onCommand:codexScheduler.showUsage"
+  ],
+  "contributes": {
+    "commands": [
+      { "command": "codexScheduler.scheduleCurrentDraft", "title": "Codex Scheduler: Schedule Current Draft", "icon": "$(clock)" },
+      { "command": "codexScheduler.scheduleClipboard", "title": "Codex Scheduler: Schedule Prompt from Clipboard" },
+      { "command": "codexScheduler.manageScheduled", "title": "Codex Scheduler: Manage Scheduled Prompts" },
+      { "command": "codexScheduler.diagnose", "title": "Codex Scheduler: Diagnose Codex Integration" },
+      { "command": "codexScheduler.showUsage", "title": "Codex Scheduler: Show Codex Usage" }
+    ],
+    "keybindings": [
+      { "command": "codexScheduler.scheduleCurrentDraft", "key": "ctrl+alt+s", "when": "isWindows" }
+    ],
+    "configuration": {
+      "title": "Codex Scheduler",
+      "properties": {
+        "codexScheduler.codexCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to the Codex executable. Leave blank to auto-discover it from PATH or the official OpenAI Codex extension."
+        },
+        "codexScheduler.pollIntervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 10,
+          "maximum": 300,
+          "description": "How often queued jobs are checked while VS Code is running."
+        },
+        "codexScheduler.resetSafetySeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 600,
+          "description": "Safety delay after a reported Codex reset timestamp before the first send attempt."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test",
+    "package": "npx -y @vscode/vsce package --out codex-scheduler.vsix"
+  },
+  "files": ["src/**", "README.md", "LICENSE"],
+  "repository": { "type": "git", "url": "https://github.com/Leon-Davies/Codex-scheduler.git" }
+}
