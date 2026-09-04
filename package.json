@@ -2,7 +2,7 @@
   "name": "codex-scheduler",
   "displayName": "Codex Scheduler",
   "description": "Schedule prompts into existing OpenAI Codex conversations from VS Code.",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "leon-davies",
   "license": "MIT",
   "engines": {
@@ -21,6 +21,7 @@
     "onStartupFinished",
     "onCommand:codexScheduler.scheduleCurrentDraft",
     "onCommand:codexScheduler.scheduleClipboard",
+    "onCommand:codexScheduler.testDraftCapture",
     "onCommand:codexScheduler.manageScheduled",
     "onCommand:codexScheduler.diagnose",
     "onCommand:codexScheduler.showUsage"
@@ -35,6 +36,10 @@
       {
         "command": "codexScheduler.scheduleClipboard",
         "title": "Codex Scheduler: Schedule Prompt from Clipboard"
+      },
+      {
+        "command": "codexScheduler.testDraftCapture",
+        "title": "Codex Scheduler: Test Draft Capture (No Send)"
       },
       {
         "command": "codexScheduler.manageScheduled",
@@ -53,7 +58,12 @@
       {
         "command": "codexScheduler.scheduleCurrentDraft",
         "key": "ctrl+alt+s",
-        "when": "isWindows"
+        "when": "isWindows || remoteName == wsl"
+      },
+      {
+        "command": "codexScheduler.testDraftCapture",
+        "key": "ctrl+alt+shift+s",
+        "when": "isWindows || remoteName == wsl"
       }
     ],
     "configuration": {
