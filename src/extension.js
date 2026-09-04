@@ -4,6 +4,7 @@ const vscode = require('vscode');
 const { CodexService } = require('./codex/service');
 const { discoverCodexCandidates, discoverCodexExecutable } = require('./codex/executableDiscovery');
 const { summarizeRateLimits } = require('./codex/rateLimits');
+const { captureFocusedText } = require('./platform/windowsDraftCapture');
 const { JobStore } = require('./scheduler/jobStore');
 const { isPending } = require('./scheduler/jobs');
 const { Scheduler } = require('./scheduler/scheduler');
@@ -111,6 +112,10 @@ function activate(context) {
       }
     }),
 
+    vscode.commands.registerCommand('codexScheduler.testDraftCapture', async () => {
+      await testDraftCapture({ vscode, output });
+    }),
+
     vscode.commands.registerCommand('codexScheduler.manageScheduled', async () => {
       await manageScheduled({ vscode, store, scheduler, updateStatusBar });
     }),
@@ -139,6 +144,26 @@ function activate(context) {
   context.subscriptions.push({ dispose: () => codex.dispose() });
 
   output.appendLine('[extension] Codex Scheduler activated.');
+}
+
+async function testDraftCapture({ vscode, output }) {
+  try {
+    const prompt = await captureFocusedText(vscode);
+    output.appendLine(`[draft capture] SUCCESS — ${prompt.length} characters captured; nothing was scheduled or sent.`);
+    await vscode.window.showQuickPick([
+      {
+        label: '$(check) Draft capture succeeded',
+        description: `${prompt.length.toLocaleString()} characters`,
+        detail: preview(prompt, 800),
+      },
+    ], {
+      title: 'Codex Scheduler — Draft capture test (nothing will be sent)',
+      placeHolder: 'Captured prompt preview. Press Escape or Enter to close.',
+    });
+  } catch (error) {
+    output.appendLine(`[draft capture] FAILED — ${error.stack || error.message}`);
+    vscode.window.showErrorMessage(`Codex Scheduler draft capture failed: ${error.message}`);
+  }
 }
 
 async function manageScheduled({ vscode, store, scheduler, updateStatusBar }) {
@@ -284,4 +309,5 @@ module.exports = {
   activate,
   deactivate,
   recoverInterruptedJobs,
+  testDraftCapture,
 };
