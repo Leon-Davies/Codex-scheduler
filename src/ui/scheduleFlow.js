@@ -21,12 +21,63 @@ function formatThreadTime(epochSeconds) {
 
 function normalizeThreadTitle(value) {
   return String(value || '')
+    .normalize('NFKD')
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
-    .trim()
-    .toLocaleLowerCase();
+    .trim();
 }
 
-async function chooseThread(vscode, codex, workspaceState, preferredThreadTitles = []) {
+function titleMatchScore(threadTitle, candidateTitle) {
+  const thread = normalizeThreadTitle(threadTitle);
+  const candidate = normalizeThreadTitle(candidateTitle);
+  if (!thread || !candidate) return 0;
+  if (thread === candidate) return 1000;
+
+  const shorter = Math.min(thread.length, candidate.length);
+  if (shorter >= 8 && (candidate.includes(thread) || thread.includes(candidate))) {
+    return 850 - Math.min(120, Math.abs(thread.length - candidate.length));
+  }
+
+  const threadTokens = new Set(thread.split(' ').filter((token) => token.length > 1));
+  const candidateTokens = new Set(candidate.split(' ').filter((token) => token.length > 1));
+  if (threadTokens.size < 2 || candidateTokens.size < 2) return 0;
+
+  let intersection = 0;
+  for (const token of threadTokens) {
+    if (candidateTokens.has(token)) intersection += 1;
+  }
+  const union = new Set([...threadTokens, ...candidateTokens]).size;
+  const similarity = union ? intersection / union : 0;
+  return similarity >= 0.8 ? Math.round(650 + (similarity * 100)) : 0;
+}
+
+function findPreferredThread(threads, preferredThreadTitles = []) {
+  const candidates = (Array.isArray(preferredThreadTitles) ? preferredThreadTitles : [preferredThreadTitles])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  if (candidates.length === 0) return null;
+
+  const scored = threads
+    .map((thread) => ({
+      thread,
+      score: Math.max(0, ...candidates.map((candidate) => titleMatchScore(thread.name, candidate))),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0 || scored[0].score < 700) return null;
+  if (scored.length > 1 && scored[0].score === scored[1].score) return null;
+  return scored[0].thread;
+}
+
+async function chooseThread(
+  vscode,
+  codex,
+  workspaceState,
+  preferredThreadTitles = [],
+  { allowPicker = true } = {},
+) {
   const cwd = codex.getWorkspaceCwd();
   let threads = await codex.listVscodeThreads(cwd, 30);
   if (threads.length === 0 && cwd) {
@@ -36,23 +87,22 @@ async function chooseThread(vscode, codex, workspaceState, preferredThreadTitles
     throw new Error('No stored Codex VS Code conversations were found. Start or resume a Codex conversation first, then try again.');
   }
 
-  const preferred = new Set(
-    (Array.isArray(preferredThreadTitles) ? preferredThreadTitles : [preferredThreadTitles])
-      .map(normalizeThreadTitle)
-      .filter(Boolean),
-  );
-
-  if (preferred.size > 0) {
-    const exactMatches = threads.filter((thread) => preferred.has(normalizeThreadTitle(thread.name)));
-    if (exactMatches.length === 1) {
-      await workspaceState.update('codexScheduler.lastThreadId', exactMatches[0].id);
-      return exactMatches[0];
-    }
+  const preferred = findPreferredThread(threads, preferredThreadTitles);
+  if (preferred) {
+    await workspaceState.update('codexScheduler.lastThreadId', preferred.id);
+    return preferred;
   }
 
   if (threads.length === 1) {
     await workspaceState.update('codexScheduler.lastThreadId', threads[0].id);
     return threads[0];
+  }
+
+  if (!allowPicker) {
+    const error = new Error('Could not identify the visible Codex conversation automatically. Keep that conversation visible and try again.');
+    error.code = 'CODEX_SCHEDULER_THREAD_NOT_IDENTIFIED';
+    error.threadTitleCandidates = preferredThreadTitles;
+    throw error;
   }
 
   const lastThreadId = workspaceState.get('codexScheduler.lastThreadId');
@@ -71,7 +121,7 @@ async function chooseThread(vscode, codex, workspaceState, preferredThreadTitles
 
   const choice = await vscode.window.showQuickPick(items, {
     title: 'Codex Scheduler — Target conversation',
-    placeHolder: 'Could not identify the visible Codex conversation automatically. Choose it once to continue safely.',
+    placeHolder: 'Choose the existing Codex conversation that should receive this prompt',
     matchOnDescription: true,
     matchOnDetail: true,
   });
@@ -127,12 +177,12 @@ async function buildUsageResetTiming(vscode, codex, suppliedLimits = null) {
 
 async function buildAtTimeTiming(vscode) {
   const entered = await vscode.window.showInputBox({
-    title: 'Codex Scheduler — Send at a specific time',
-    prompt: 'Enter local time (HH:mm) or local date/time (YYYY-MM-DD HH:mm)',
-    placeHolder: '03:15',
+    title: 'Codex Scheduler — Send at time',
+    prompt: 'Enter HH:mm, or a delay such as “in 20m” / “in 2h”.',
+    placeHolder: '14:30   or   in 20m',
     validateInput: (value) => {
       const parsed = parseLocalScheduleTime(value);
-      if (!parsed) return 'Enter a valid time such as 03:15 or 2026-09-05 03:15.';
+      if (!parsed) return 'Use HH:mm, YYYY-MM-DD HH:mm, in 20m, or in 2h.';
       if (parsed.getTime() <= Date.now()) return 'The selected date/time is in the past.';
       return null;
     },
@@ -173,8 +223,8 @@ async function chooseTrigger(vscode, codex) {
     },
     {
       label: '$(clock) Send at a specific time',
-      description: 'Choose a local date/time',
-      detail: 'Examples: 03:15 or 2026-09-05 03:15',
+      description: 'Enter a clock time or relative delay',
+      detail: 'Examples: 14:30, in 20m, in 2h',
       value: 'atTime',
     },
   ], {
@@ -210,6 +260,8 @@ async function schedulePrompt({
   triggerType = null,
   confirmCapturedPrompt = true,
   preferredThreadTitles = [],
+  allowThreadPicker = true,
+  toggleUsageReset = false,
 }) {
   let finalPrompt = String(prompt || '');
   if (!finalPrompt.trim()) {
@@ -230,8 +282,6 @@ async function schedulePrompt({
       ? overlayContext.threadTitleCandidates
       : []);
 
-  // The composer overlay already captured the text the user just clicked beside.
-  // Do not interrupt that direct interaction with the old prototype confirmation UI.
   if (confirmCapturedPrompt && !overlayContextIsCurrent) {
     const confirmation = await confirmPrompt(vscode, finalPrompt);
     if (!confirmation) {
@@ -246,18 +296,41 @@ async function schedulePrompt({
     }
   }
 
+  // For explicit time scheduling, the first thing the user sees after choosing
+  // the menu item is the compact time input. Thread resolution stays behind it.
+  const timing = await timingForTrigger(vscode, codex, triggerType);
+  if (!timing) {
+    return null;
+  }
+
   const thread = await chooseThread(
     vscode,
     codex,
     workspaceState,
     effectivePreferredThreadTitles,
+    { allowPicker: allowThreadPicker },
   );
   if (!thread) {
     return null;
   }
-  const timing = await timingForTrigger(vscode, codex, triggerType);
-  if (!timing) {
-    return null;
+
+  if (toggleUsageReset && timing.trigger.type === 'usageReset') {
+    const existing = store.all().filter((job) => (
+      job.threadId === thread.id
+      && job.trigger?.type === 'usageReset'
+      && ['queued', 'checking'].includes(job.status)
+    ));
+    if (existing.length > 0) {
+      for (const job of existing) {
+        await store.update(job.id, {
+          status: 'cancelled',
+          lastError: 'Disabled from the Codex composer.',
+        });
+      }
+      onJobsChanged?.();
+      vscode.window.showInformationMessage('Send when quota resets disabled.');
+      return { toggledOff: true, thread };
+    }
   }
 
   const workspace = codex.getWorkspaceCwd();
@@ -271,10 +344,11 @@ async function schedulePrompt({
   await store.add(job);
   onJobsChanged?.();
 
-  const whenLabel = timing.trigger.type === 'usageReset'
-    ? `after Codex usage becomes available (first check ${formatLocalDateTime(job.nextAttemptAt)})`
-    : formatLocalDateTime(job.nextAttemptAt);
-  vscode.window.showInformationMessage(`Codex prompt scheduled for ${whenLabel}.`);
+  if (timing.trigger.type === 'usageReset' && toggleUsageReset) {
+    vscode.window.showInformationMessage('Send when quota resets enabled.');
+  } else {
+    vscode.window.showInformationMessage(`Codex prompt scheduled for ${formatLocalDateTime(job.nextAttemptAt)}.`);
+  }
   return job;
 }
 
@@ -320,10 +394,12 @@ module.exports = {
   buildUsageResetTiming,
   chooseThread,
   chooseTrigger,
+  findPreferredThread,
   normalizeThreadTitle,
   preview,
   rateLimitSummaryText,
   scheduleCurrentDraft,
   schedulePrompt,
   timingForTrigger,
+  titleMatchScore,
 };
