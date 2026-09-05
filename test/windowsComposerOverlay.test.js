@@ -5,6 +5,7 @@ const path = require('path');
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  OVERLAY_CONTEXT_KEY,
   canUseComposerOverlay,
   toWindowsPath,
 } = require('../src/platform/windowsComposerOverlay');
@@ -13,6 +14,7 @@ const { isWslEnvironment } = require('../src/platform/windowsDraftCapture');
 test('composer overlay platform helpers are available', () => {
   assert.equal(typeof canUseComposerOverlay, 'function');
   assert.equal(typeof toWindowsPath, 'function');
+  assert.equal(OVERLAY_CONTEXT_KEY, 'codexScheduler.pendingOverlayContext');
 });
 
 test('non-Windows non-WSL hosts pass paths through unchanged', () => {
@@ -44,7 +46,29 @@ test('overlay supports fullscreen composers and opens menu on mouse-down', () =>
 
   assert.match(script, /Add_MouseDown/);
   assert.match(script, /Cursor\]::Position/);
-  assert.match(script, /Do not reject very wide editor controls/);
   assert.doesNotMatch(script, /\$rect\.width -gt \(\$windowRect\.width \* 0\.75\)/);
   assert.match(script, /MouseOverBackColor/);
+});
+
+test('overlay uses cached geometry for smooth resize tracking and hides outside VS Code', () => {
+  const script = fs.readFileSync(
+    path.join(__dirname, '..', 'resources', 'codex-scheduler-overlay.ps1'),
+    'utf8',
+  );
+
+  assert.match(script, /function Refresh-CachedAnchor/);
+  assert.match(script, /\$timer\.Interval = 90/);
+  assert.match(script, /\$script:scanCounter -ge 7/);
+  assert.match(script, /TopMost, so hide it whenever VS Code is not the/);
+});
+
+test('overlay captures thread-title candidates for automatic current-thread matching', () => {
+  const script = fs.readFileSync(
+    path.join(__dirname, '..', 'resources', 'codex-scheduler-overlay.ps1'),
+    'utf8',
+  );
+
+  assert.match(script, /function Get-ThreadTitleCandidates/);
+  assert.match(script, /threadTitleCandidates = \$threadTitleCandidates/);
+  assert.match(script, /Select-Object -First 12/);
 });
