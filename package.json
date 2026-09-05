@@ -2,7 +2,7 @@
   "name": "codex-scheduler",
   "displayName": "Codex Scheduler",
   "description": "Schedule prompts into existing OpenAI Codex conversations from VS Code.",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "publisher": "leon-davies",
   "license": "MIT",
   "engines": {
@@ -137,7 +137,7 @@
         "codexScheduler.composerOverlay.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show the Windows companion Schedule button above the visible Codex send control when using native Windows or VS Code Remote/WSL."
+          "description": "Show the Windows companion Schedule button beside the visible Codex send control when using native Windows or VS Code Remote/WSL."
         }
       }
     }
