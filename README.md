@@ -15,7 +15,7 @@ It lets you leave a prompt typed in the existing Codex composer and schedule tha
 
 ## Current behavior
 
-- **Send when quota resets** is one-shot. It sends once after the next reset/availability check, then automatically turns off.
+- **Send when quota resets** is one-shot: disabled → enabled → prompt queued once after the reset/availability check → disabled again automatically.
 - **Send at specific time...** supports clock times and relative delays.
 - Existing Codex conversations are targeted through Codex's native queued-turn API.
 - A brand-new unsent Codex chat may not yet have a persisted thread target. Send one normal message first, then schedule subsequent prompts.
