@@ -84,7 +84,7 @@ async function chooseThread(
     threads = await codex.listVscodeThreads(null, 30);
   }
   if (threads.length === 0) {
-    throw new Error('No stored Codex VS Code conversations were found. Start or resume a Codex conversation first, then try again.');
+    throw new Error('No stored Codex VS Code conversations were found. Send one Codex message first, then try scheduling again.');
   }
 
   const preferred = findPreferredThread(threads, preferredThreadTitles);
@@ -99,9 +99,10 @@ async function chooseThread(
   }
 
   if (!allowPicker) {
-    const error = new Error('Could not identify the visible Codex conversation automatically. Keep that conversation visible and try again.');
+    const error = new Error('Could not identify the visible Codex conversation automatically.');
     error.code = 'CODEX_SCHEDULER_THREAD_NOT_IDENTIFIED';
     error.threadTitleCandidates = preferredThreadTitles;
+    error.possiblyNewConversation = preferredThreadTitles.length === 0;
     throw error;
   }
 
@@ -169,6 +170,7 @@ async function buildUsageResetTiming(vscode, codex, suppliedLimits = null) {
 
   return {
     trigger: { type: 'usageReset' },
+    reportedResetAt: resetMs || null,
     nextAttemptAt: resetMs
       ? Math.max(Date.now() + 15_000, resetMs + Math.max(0, safetySeconds) * 1000)
       : Date.now() + 30_000,
@@ -177,13 +179,12 @@ async function buildUsageResetTiming(vscode, codex, suppliedLimits = null) {
 
 async function buildAtTimeTiming(vscode) {
   const entered = await vscode.window.showInputBox({
-    title: 'Codex Scheduler — Send at time',
-    prompt: 'Enter HH:mm, or a delay such as “in 20m” / “in 2h”.',
-    placeHolder: '14:30   or   in 20m',
+    title: 'Send at',
+    placeHolder: 'HH:MM (24h) or in 20m / in 2h',
     validateInput: (value) => {
       const parsed = parseLocalScheduleTime(value);
-      if (!parsed) return 'Use HH:mm, YYYY-MM-DD HH:mm, in 20m, or in 2h.';
-      if (parsed.getTime() <= Date.now()) return 'The selected date/time is in the past.';
+      if (!parsed) return 'Use 14:30, in 20m, or in 2h.';
+      if (parsed.getTime() <= Date.now()) return 'Choose a future time.';
       return null;
     },
   });
@@ -345,7 +346,10 @@ async function schedulePrompt({
   onJobsChanged?.();
 
   if (timing.trigger.type === 'usageReset' && toggleUsageReset) {
-    vscode.window.showInformationMessage('Send when quota resets enabled.');
+    const resetText = timing.reportedResetAt
+      ? ` · next reset ${formatLocalDateTime(timing.reportedResetAt)}`
+      : '';
+    vscode.window.showInformationMessage(`Send when quota resets enabled${resetText}.`);
   } else {
     vscode.window.showInformationMessage(`Codex prompt scheduled for ${formatLocalDateTime(job.nextAttemptAt)}.`);
   }
