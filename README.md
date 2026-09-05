@@ -21,7 +21,7 @@ Confirmed on VS Code Remote/WSL with the official Codex extension:
 - native durable `thread/queue/*` support;
 - non-destructive Codex composer text capture through Windows UI Automation.
 
-The current Windows/WSL build places a small companion Schedule control above Codex's Send button. It does not patch the OpenAI extension or inject JavaScript into its webview.
+The current Windows/WSL build places a compact circular companion Schedule control directly above Codex's Send button. It does not patch the OpenAI extension or inject JavaScript into its webview.
 
 ## Development
 
