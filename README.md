@@ -9,28 +9,34 @@ It lets you leave a prompt typed in the existing Codex composer and schedule tha
 1. Type the prompt normally in Codex.
 2. Click the small clock button above Codex's Send button.
 3. Choose either:
-   - **Send when quota resets** to enable the job immediately.
-   - **Send at specific time...** to enter a local time such as `03:15`.
+   - **Send when quota resets** to arm a one-shot reset send.
+   - **Send at specific time...** to enter `HH:MM` or a short delay such as `in 20m` / `in 2h`.
 4. The scheduler later adds the prompt to the same Codex conversation through Codex's native queued-turn API.
 
-The overlay attempts to identify the visible Codex conversation from its accessibility title and only falls back to a conversation picker when it cannot find one unique safe match.
+## Current behavior
 
-## Current status
+- **Send when quota resets** is one-shot. It sends once after the next reset/availability check, then automatically turns off.
+- **Send at specific time...** supports clock times and relative delays.
+- Existing Codex conversations are targeted through Codex's native queued-turn API.
+- A brand-new unsent Codex chat may not yet have a persisted thread target. Send one normal message first, then schedule subsequent prompts.
+- The scheduler fails closed if it cannot identify the visible Codex conversation safely.
 
-This repository is still under active qualification against the current OpenAI Codex VS Code extension. Windows + VS Code Remote/WSL is the primary tested environment.
+## Development status
 
-Current capabilities include:
+Windows + VS Code Remote/WSL is the primary tested environment.
+
+Confirmed so far:
 
 - real Codex quota/reset reads;
 - existing Codex thread discovery;
 - native durable queued-turn delivery;
-- fixed-time and quota-reset jobs;
+- exact draft capture from the visible Codex composer;
+- automatic current-thread matching for established chats;
+- end-to-end timed delivery into the same existing Codex conversation;
 - persistent jobs across VS Code restarts;
 - duplicate-send protection;
-- UI Automation draft capture;
-- a composer-adjacent Schedule button for Windows/WSL;
-- automatic current-thread matching when the visible title can be resolved uniquely;
-- cached geometry tracking so the overlay follows resize/fullscreen transitions smoothly;
-- automatic hiding while VS Code is not foreground, so the TopMost helper never floats over unrelated applications.
+- composer-adjacent Schedule button for Windows/WSL;
+- cached geometry tracking across resize/fullscreen transitions;
+- automatic hiding while VS Code is not foreground.
 
-V0 currently requires VS Code and the machine to remain running for timers to fire.
+V0 currently requires VS Code and the machine to remain running/awake for timers to fire.
