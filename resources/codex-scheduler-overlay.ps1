@@ -151,7 +151,6 @@ function Find-ComposerAnchor($Root) {
       if ($type -eq 'ControlType.Edit' -or $type -eq 'ControlType.Document') {
         if ($rect.width -lt 120 -or $rect.height -lt 24) { continue }
         if ($rect.width -gt ($windowRect.width * 0.75) -and $rect.centerX -lt ($windowRect.x + ($windowRect.width * 0.62))) {
-          # Broad central editor controls are unlikely to be the narrow Codex composer.
           continue
         }
 
@@ -264,23 +263,36 @@ $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
 $form.ShowInTaskbar = $false
 $form.TopMost = $true
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::Manual
-$form.Size = New-Object System.Drawing.Size(34, 34)
-$form.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
-$form.Opacity = 0.98
+$form.AutoScaleMode = [System.Windows.Forms.AutoScaleMode]::None
+$form.ClientSize = New-Object System.Drawing.Size(28, 28)
+$form.MinimumSize = New-Object System.Drawing.Size(1, 1)
+$form.MaximumSize = New-Object System.Drawing.Size(64, 64)
+$form.Padding = New-Object System.Windows.Forms.Padding(0)
+$form.BackColor = [System.Drawing.Color]::Magenta
+$form.TransparencyKey = [System.Drawing.Color]::Magenta
+$form.Opacity = 1.0
 $form.Visible = $false
 
 $button = New-Object System.Windows.Forms.Button
-$button.Dock = [System.Windows.Forms.DockStyle]::Fill
+$button.AutoSize = $false
+$button.Location = New-Object System.Drawing.Point(0, 0)
+$button.Size = New-Object System.Drawing.Size(28, 28)
 $button.Text = [char]0x25F7
-$button.Font = New-Object System.Drawing.Font('Segoe UI Symbol', 11, [System.Drawing.FontStyle]::Regular)
+$button.Font = New-Object System.Drawing.Font('Segoe UI Symbol', 9, [System.Drawing.FontStyle]::Regular)
 $button.ForeColor = [System.Drawing.Color]::Gainsboro
 $button.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
 $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 $button.FlatAppearance.BorderSize = 1
-$button.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(75, 75, 78)
+$button.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(82, 82, 86)
 $button.Cursor = [System.Windows.Forms.Cursors]::Hand
 $button.TabStop = $false
+$button.Margin = New-Object System.Windows.Forms.Padding(0)
 $form.Controls.Add($button)
+
+$buttonPath = New-Object System.Drawing.Drawing2D.GraphicsPath
+$buttonPath.AddEllipse(0, 0, 27, 27)
+$button.Region = New-Object System.Drawing.Region($buttonPath)
+$form.Region = New-Object System.Drawing.Region($buttonPath)
 
 $tooltip = New-Object System.Windows.Forms.ToolTip
 $tooltip.SetToolTip($button, 'Schedule Codex prompt')
@@ -298,7 +310,7 @@ $menu.Items.Add($resetItem) | Out-Null
 $menu.Items.Add($timeItem) | Out-Null
 
 $button.Add_Click({
-  $menu.Show($button, (New-Object System.Drawing.Point(0, $button.Height)))
+  $menu.Show($button, (New-Object System.Drawing.Point(-150, $button.Height + 2)))
 })
 $resetItem.Add_Click({ Write-OverlayEvent 'usageReset' })
 $timeItem.Add_Click({ Write-OverlayEvent 'atTime' })
@@ -313,7 +325,6 @@ $timer.Add_Tick({
   }
 
   if ([bool]$foreground.overlay) {
-    # Keep the button/menu visible while the helper itself owns foreground focus.
     return
   }
 
@@ -330,8 +341,23 @@ $timer.Add_Tick({
   $script:lastAnchor = $anchor
 
   $send = $anchor.button.rect
-  $x = [int][math]::Round($send.x - $form.Width - 6)
-  $y = [int][math]::Round($send.y + (($send.height - $form.Height) / 2))
+  $targetSize = [int][math]::Round([math]::Max(24, [math]::Min(30, $send.height - 1)))
+  if ($targetSize -ne $form.ClientSize.Width -or $targetSize -ne $form.ClientSize.Height) {
+    $form.ClientSize = New-Object System.Drawing.Size($targetSize, $targetSize)
+    $button.Location = New-Object System.Drawing.Point(0, 0)
+    $button.Size = New-Object System.Drawing.Size($targetSize, $targetSize)
+    $diameter = [math]::Max(1, $targetSize - 1)
+    $path = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $path.AddEllipse(0, 0, $diameter, $diameter)
+    $button.Region = New-Object System.Drawing.Region($path)
+    $form.Region = New-Object System.Drawing.Region($path)
+  }
+
+  # The current Codex composer leaves a narrow clear column directly above Send.
+  # Align Schedule to that column rather than covering the model selector to Send's left.
+  $gap = 7
+  $x = [int][math]::Round($send.centerX - ($form.ClientSize.Width / 2))
+  $y = [int][math]::Round($send.y - $form.ClientSize.Height - $gap)
   $form.Location = New-Object System.Drawing.Point($x, $y)
 
   if (-not $form.Visible) {
