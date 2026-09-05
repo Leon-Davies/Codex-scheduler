@@ -1,9 +1,30 @@
 'use strict';
 
+function parseRelativeScheduleTime(value, now) {
+  const match = String(value || '').trim().match(/^(?:in\s+)?(\d+(?:\.\d+)?)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const amount = Number(match[1]);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null;
+  }
+
+  const unit = match[2].toLowerCase();
+  const multiplier = unit.startsWith('h') ? 60 * 60 * 1000 : 60 * 1000;
+  return new Date(now.getTime() + amount * multiplier);
+}
+
 function parseLocalScheduleTime(input, now = new Date()) {
   const value = String(input || '').trim();
   if (!value) {
     return null;
+  }
+
+  const relative = parseRelativeScheduleTime(value, now);
+  if (relative) {
+    return relative;
   }
 
   const timeOnly = /^(\d{1,2}):(\d{2})$/;
@@ -48,11 +69,6 @@ function parseLocalScheduleTime(input, now = new Date()) {
     return scheduled;
   }
 
-  const parsed = new Date(value);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed;
-  }
-
   return null;
 }
 
@@ -73,4 +89,5 @@ function formatLocalDateTime(value) {
 module.exports = {
   formatLocalDateTime,
   parseLocalScheduleTime,
+  parseRelativeScheduleTime,
 };
