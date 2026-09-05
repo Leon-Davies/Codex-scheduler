@@ -143,7 +143,9 @@ function activate(context) {
       output.appendLine(`[schedule overlay/${triggerType}] ${error.stack || error.message}`);
       if (error.code === 'CODEX_SCHEDULER_THREAD_NOT_IDENTIFIED') {
         output.appendLine(`[overlay] visible title candidates: ${JSON.stringify(error.threadTitleCandidates || [])}`);
-        vscode.window.showWarningMessage('Codex Scheduler could not identify this Codex conversation automatically. Keep it visible and try again.');
+        vscode.window.showWarningMessage(
+          'No persisted Codex thread was found for this visible chat. If it is new, send one message normally first, then schedule the next prompt.',
+        );
         return;
       }
       vscode.window.showErrorMessage(`Codex Scheduler: ${error.message}`);
