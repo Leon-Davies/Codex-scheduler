@@ -110,7 +110,7 @@ function Find-ComposerAnchor($Root) {
 
   $buttons = @()
   $editors = @()
-  $count = [math]::Min($all.Count, 2400)
+  $count = [math]::Min($all.Count, 3000)
 
   for ($i = 0; $i -lt $count; $i++) {
     try {
@@ -150,17 +150,16 @@ function Find-ComposerAnchor($Root) {
 
       if ($type -eq 'ControlType.Edit' -or $type -eq 'ControlType.Document') {
         if ($rect.width -lt 120 -or $rect.height -lt 24) { continue }
-        if ($rect.width -gt ($windowRect.width * 0.75) -and $rect.centerX -lt ($windowRect.x + ($windowRect.width * 0.62))) {
-          continue
-        }
 
+        # Do not reject very wide editor controls. In fullscreen Codex the composer
+        # legitimately spans most of the VS Code window. Pair scoring against the
+        # actual Send button is a safer discriminator than width alone.
         $text = Read-ElementText $element
         $score = if ($type -eq 'ControlType.Edit') { 100 } else { 55 }
         if ($identity -match '(?i)prompt|message|ask|composer|input|textarea|codex|chat') { $score += 110 }
         elseif ($identity -match '(?i)editor') { $score += 15 }
         if ([bool]$current.IsKeyboardFocusable) { $score += 25 }
         if ([bool]$current.HasKeyboardFocus) { $score += 80 }
-        if ($rect.centerX -ge ($windowRect.x + ($windowRect.width * 0.55))) { $score += 25 }
         if ($rect.centerY -ge ($windowRect.y + ($windowRect.height * 0.55))) { $score += 25 }
         if ($rect.centerY -ge ($windowRect.y + ($windowRect.height * 0.72))) { $score += 30 }
         if (-not [string]::IsNullOrWhiteSpace($text)) { $score += 40 }
@@ -187,15 +186,15 @@ function Find-ComposerAnchor($Root) {
       $verticalDelta = [math]::Abs([double]$button.rect.centerY - [double]$editor.rect.centerY)
       $rightDelta = [math]::Abs([double]$button.rect.centerX - [double]$editor.rect.right)
 
-      if ($verticalDelta -le [math]::Max(70, ($editor.rect.height / 2) + 35)) { $pairScore += 90 }
+      if ($verticalDelta -le [math]::Max(90, ($editor.rect.height / 2) + 45)) { $pairScore += 90 }
       else { $pairScore -= [math]::Min(180, [int]$verticalDelta) }
 
-      if ($button.rect.centerX -ge ($editor.rect.x + ($editor.rect.width * 0.55)) -and $button.rect.centerX -le ($editor.rect.right + 120)) {
+      if ($button.rect.centerX -ge ($editor.rect.x + ($editor.rect.width * 0.55)) -and $button.rect.centerX -le ($editor.rect.right + 140)) {
         $pairScore += 110
       }
 
-      if ($rightDelta -le 120) { $pairScore += 70 }
-      if ($button.rect.centerY -ge ($editor.rect.y - 30) -and $button.rect.centerY -le ($editor.rect.bottom + 30)) { $pairScore += 60 }
+      if ($rightDelta -le 140) { $pairScore += 70 }
+      if ($button.rect.centerY -ge ($editor.rect.y - 35) -and $button.rect.centerY -le ($editor.rect.bottom + 35)) { $pairScore += 60 }
 
       if ($pairScore -gt $bestPairScore) {
         $bestPairScore = $pairScore
@@ -278,12 +277,16 @@ $button.AutoSize = $false
 $button.Location = New-Object System.Drawing.Point(0, 0)
 $button.Size = New-Object System.Drawing.Size(28, 28)
 $button.Text = [char]0x25F7
+$button.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $button.Font = New-Object System.Drawing.Font('Segoe UI Symbol', 9, [System.Drawing.FontStyle]::Regular)
-$button.ForeColor = [System.Drawing.Color]::Gainsboro
-$button.BackColor = [System.Drawing.Color]::FromArgb(45, 45, 48)
+$button.ForeColor = [System.Drawing.Color]::WhiteSmoke
+$button.BackColor = [System.Drawing.Color]::FromArgb(48, 48, 52)
+$button.UseVisualStyleBackColor = $false
 $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 $button.FlatAppearance.BorderSize = 1
-$button.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(82, 82, 86)
+$button.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(112, 112, 118)
+$button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(66, 66, 72)
+$button.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(78, 78, 84)
 $button.Cursor = [System.Windows.Forms.Cursors]::Hand
 $button.TabStop = $false
 $button.Margin = New-Object System.Windows.Forms.Padding(0)
@@ -309,14 +312,20 @@ $timeItem.Text = 'Send at specific time...'
 $menu.Items.Add($resetItem) | Out-Null
 $menu.Items.Add($timeItem) | Out-Null
 
-$button.Add_Click({
-  $menu.Show($button, (New-Object System.Drawing.Point(-150, $button.Height + 2)))
+# Open on mouse-down instead of Click. The overlay is its own top-level window,
+# and waiting for a full Click sequence proved unreliable when VS Code/overlay
+# foreground ownership changed between mouse-down and mouse-up.
+$button.Add_MouseDown({
+  param($sender, $eventArgs)
+  if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
+    $menu.Show([System.Windows.Forms.Cursor]::Position)
+  }
 })
 $resetItem.Add_Click({ Write-OverlayEvent 'usageReset' })
 $timeItem.Add_Click({ Write-OverlayEvent 'atTime' })
 
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 350
+$timer.Interval = 300
 $timer.Add_Tick({
   $foreground = Get-ForegroundVsCodeRoot
   if ($null -eq $foreground) {
@@ -353,8 +362,6 @@ $timer.Add_Tick({
     $form.Region = New-Object System.Drawing.Region($path)
   }
 
-  # The current Codex composer leaves a narrow clear column directly above Send.
-  # Align Schedule to that column rather than covering the model selector to Send's left.
   $gap = 7
   $x = [int][math]::Round($send.centerX - ($form.ClientSize.Width / 2))
   $y = [int][math]::Round($send.y - $form.ClientSize.Height - $gap)
