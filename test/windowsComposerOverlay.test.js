@@ -35,3 +35,16 @@ test('overlay disables WinForms autoscaling and anchors above Send', () => {
   assert.match(script, /AddEllipse/);
   assert.doesNotMatch(script, /\$send\.x - \$form\.Width/);
 });
+
+test('overlay supports fullscreen composers and opens menu on mouse-down', () => {
+  const script = fs.readFileSync(
+    path.join(__dirname, '..', 'resources', 'codex-scheduler-overlay.ps1'),
+    'utf8',
+  );
+
+  assert.match(script, /Add_MouseDown/);
+  assert.match(script, /Cursor\]::Position/);
+  assert.match(script, /Do not reject very wide editor controls/);
+  assert.doesNotMatch(script, /\$rect\.width -gt \(\$windowRect\.width \* 0\.75\)/);
+  assert.match(script, /MouseOverBackColor/);
+});
