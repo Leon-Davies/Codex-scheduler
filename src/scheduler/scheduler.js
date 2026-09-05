@@ -95,6 +95,8 @@ class Scheduler {
 
       // Once thread/queue/add returns an ID, never automatically enqueue this job
       // again. The native Codex queue now owns delivery to the existing thread.
+      // This terminal transition is also what makes reset scheduling one-shot:
+      // submitted reset jobs are no longer considered armed/pending.
       await this.store.update(job.id, {
         status: 'submitted',
         queuedSubmissionId: queuedSubmission.id,
@@ -106,8 +108,12 @@ class Scheduler {
       this.output.appendLine(
         `[scheduler] queued ${job.id} for ${job.threadId} as ${queuedSubmission.id}`,
       );
+
+      const resetOneShot = job.trigger?.type === 'usageReset';
       void this.vscode.window.showInformationMessage(
-        `Codex Scheduler queued your prompt for ${job.threadLabel}. Codex will start it when that thread is idle.`,
+        resetOneShot
+          ? `Codex Scheduler queued your reset prompt for ${job.threadLabel}. Reset scheduling is now off.`
+          : `Codex Scheduler queued your prompt for ${job.threadLabel}. Codex will start it when that thread is idle.`,
       );
     } catch (error) {
       if (isQueueUnsupportedError(error)) {
