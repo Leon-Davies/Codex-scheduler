@@ -32,7 +32,7 @@ Confirmed so far:
 - native durable queued-turn delivery;
 - exact draft capture from the visible Codex composer;
 - automatic current-thread matching for established chats;
-- end-to-end timed delivery into the same existing Codex conversation;
+- owner-tested end-to-end timed delivery into the same existing Codex conversation;
 - one-shot reset jobs become terminal immediately after successful queue submission;
 - persistent jobs across VS Code restarts;
 - duplicate-send protection;
