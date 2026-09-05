@@ -2,7 +2,7 @@
   "name": "codex-scheduler",
   "displayName": "Codex Scheduler",
   "description": "Schedule prompts into existing OpenAI Codex conversations from VS Code.",
-  "version": "0.0.11",
+  "version": "0.0.12",
   "publisher": "leon-davies",
   "license": "MIT",
   "engines": {
