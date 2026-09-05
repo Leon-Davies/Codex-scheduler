@@ -33,4 +33,5 @@ test('overlay disables WinForms autoscaling and anchors above Send', () => {
   assert.match(script, /\$send\.centerX - \(\$form\.ClientSize\.Width \/ 2\)/);
   assert.match(script, /\$send\.y - \$form\.ClientSize\.Height - \$gap/);
   assert.match(script, /AddEllipse/);
+  assert.doesNotMatch(script, /\$send\.x - \$form\.Width/);
 });
