@@ -5,6 +5,8 @@ const { createJob } = require('../scheduler/jobs');
 const { formatLocalDateTime, parseLocalScheduleTime } = require('../scheduler/time');
 const { getNextResetMs, summarizeRateLimits } = require('../codex/rateLimits');
 
+const OVERLAY_CONTEXT_KEY = 'codexScheduler.pendingOverlayContext';
+
 function preview(text, max = 180) {
   const compact = String(text || '').replace(/\s+/g, ' ').trim();
   return compact.length <= max ? compact : `${compact.slice(0, max - 1)}…`;
@@ -215,7 +217,22 @@ async function schedulePrompt({
     return null;
   }
 
-  if (confirmCapturedPrompt) {
+  const overlayContext = workspaceState?.get?.(OVERLAY_CONTEXT_KEY);
+  const overlayContextIsCurrent = Boolean(
+    overlayContext
+    && overlayContext.action === triggerType
+    && Number.isFinite(Number(overlayContext.capturedAt))
+    && Math.abs(Date.now() - Number(overlayContext.capturedAt)) < 30_000,
+  );
+  const effectivePreferredThreadTitles = preferredThreadTitles.length > 0
+    ? preferredThreadTitles
+    : (overlayContextIsCurrent && Array.isArray(overlayContext.threadTitleCandidates)
+      ? overlayContext.threadTitleCandidates
+      : []);
+
+  // The composer overlay already captured the text the user just clicked beside.
+  // Do not interrupt that direct interaction with the old prototype confirmation UI.
+  if (confirmCapturedPrompt && !overlayContextIsCurrent) {
     const confirmation = await confirmPrompt(vscode, finalPrompt);
     if (!confirmation) {
       return null;
@@ -229,7 +246,12 @@ async function schedulePrompt({
     }
   }
 
-  const thread = await chooseThread(vscode, codex, workspaceState, preferredThreadTitles);
+  const thread = await chooseThread(
+    vscode,
+    codex,
+    workspaceState,
+    effectivePreferredThreadTitles,
+  );
   if (!thread) {
     return null;
   }
