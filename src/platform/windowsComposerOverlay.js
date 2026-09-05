@@ -6,6 +6,8 @@ const path = require('path');
 const { execFileSync, spawn } = require('child_process');
 const { getPowerShellCommand, isWslEnvironment } = require('./windowsDraftCapture');
 
+const OVERLAY_CONTEXT_KEY = 'codexScheduler.pendingOverlayContext';
+
 function toWindowsPath(filePath) {
   if (process.platform === 'win32') {
     return filePath;
@@ -87,7 +89,7 @@ class ComposerOverlay {
       this.output.appendLine(`[overlay] helper error: ${error.stack || error.message}`);
     });
 
-    this.poller = setInterval(() => this.#pollEvents(), 250);
+    this.poller = setInterval(() => this.#pollEvents(), 200);
     this.output.appendLine('[overlay] helper started.');
     return true;
   }
@@ -124,9 +126,26 @@ class ComposerOverlay {
       try {
         const event = JSON.parse(line);
         this.output.appendLine(
-          `[overlay] ${event.action || 'unknown'} captured ${String(event.prompt || '').length} character(s)`,
+          `[overlay] ${event.action || 'unknown'} captured ${String(event.prompt || '').length} character(s); `
+          + `${Array.isArray(event.threadTitleCandidates) ? event.threadTitleCandidates.length : 0} thread-title candidate(s)`,
         );
-        Promise.resolve(this.onAction?.(event)).catch((error) => {
+
+        const dispatch = async () => {
+          await this.context.workspaceState.update(OVERLAY_CONTEXT_KEY, {
+            action: event.action || null,
+            capturedAt: Number(event.capturedAt || Date.now()),
+            threadTitleCandidates: Array.isArray(event.threadTitleCandidates)
+              ? event.threadTitleCandidates
+              : [],
+          });
+          try {
+            await this.onAction?.(event);
+          } finally {
+            await this.context.workspaceState.update(OVERLAY_CONTEXT_KEY, undefined);
+          }
+        };
+
+        Promise.resolve(dispatch()).catch((error) => {
           this.output.appendLine(`[overlay] action failed: ${error.stack || error.message}`);
         });
       } catch (error) {
@@ -153,11 +172,13 @@ class ComposerOverlay {
       this.eventDir = null;
       this.eventPath = null;
     }
+    void this.context.workspaceState.update(OVERLAY_CONTEXT_KEY, undefined);
   }
 }
 
 module.exports = {
   ComposerOverlay,
+  OVERLAY_CONTEXT_KEY,
   canUseComposerOverlay,
   toWindowsPath,
 };
