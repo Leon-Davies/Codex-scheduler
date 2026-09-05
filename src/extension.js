@@ -122,17 +122,30 @@ function activate(context) {
     try {
       const prompt = String(event?.prompt || '');
       if (!prompt.trim()) {
-        vscode.window.showWarningMessage('Codex Scheduler found the composer but it was empty. Type a prompt first, then use the schedule button.');
+        vscode.window.showWarningMessage('Type a prompt in Codex before scheduling it.');
         return;
       }
+
+      const threadTitleCandidates = Array.isArray(event?.threadTitleCandidates)
+        ? event.threadTitleCandidates
+        : [];
+
       await schedulePrompt({
         ...commonScheduleArgs,
         prompt,
         triggerType,
-        confirmCapturedPrompt: true,
+        confirmCapturedPrompt: false,
+        preferredThreadTitles: threadTitleCandidates,
+        allowThreadPicker: false,
+        toggleUsageReset: triggerType === 'usageReset',
       });
     } catch (error) {
       output.appendLine(`[schedule overlay/${triggerType}] ${error.stack || error.message}`);
+      if (error.code === 'CODEX_SCHEDULER_THREAD_NOT_IDENTIFIED') {
+        output.appendLine(`[overlay] visible title candidates: ${JSON.stringify(error.threadTitleCandidates || [])}`);
+        vscode.window.showWarningMessage('Codex Scheduler could not identify this Codex conversation automatically. Keep it visible and try again.');
+        return;
+      }
       vscode.window.showErrorMessage(`Codex Scheduler: ${error.message}`);
     }
   };
