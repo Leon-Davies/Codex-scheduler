@@ -112,14 +112,17 @@ function Score-Candidate($Description, $Read, [int]$SearchDepth) {
   if (-not [bool]$Description.isOffscreen) { $score += 10 } else { $score -= 100 }
 
   $identity = "$name $automationId $className"
-  if ($identity -match '(?i)prompt|message|ask|composer|input|textarea|editor|codex|chat') { $score += 45 }
-  if ($identity -match '(?i)history|conversation|transcript|messages-list') { $score -= 70 }
+  if ($identity -match '(?i)prompt|message|ask|composer|input|textarea|codex|chat') { $score += 80 }
+  elseif ($identity -match '(?i)editor') { $score += 15 }
+  if ($identity -match '(?i)history|conversation|transcript|messages-list|terminal|search|quick input') { $score -= 90 }
 
   if ($length -gt 0 -and $length -le 20000) { $score += 15 }
   elseif ($length -gt 50000) { $score -= 80 }
 
-  # Prefer the focused pane itself over progressively broader ancestors.
-  $score -= ($SearchDepth * 8)
+  # Prefer controls found in the nearest enclosing view. When the user invokes a
+  # Codex view-title action, focus may temporarily move to the title toolbar, so
+  # progressively broader ancestors are allowed but penalised.
+  $score -= ($SearchDepth * 10)
   return $score
 }
 
@@ -136,7 +139,7 @@ function Inspect-Subtree([System.Windows.Automation.AutomationElement]$Root, [in
     return $found
   }
 
-  $count = [math]::Min($all.Count, 600)
+  $count = [math]::Min($all.Count, 900)
   for ($i = 0; $i -lt $count; $i++) {
     try {
       $element = $all.Item($i)
@@ -168,6 +171,20 @@ function Diagnostic-Candidate($Candidate) {
   }
 }
 
+function Test-StrongCandidate($Ordered) {
+  if ($null -eq $Ordered -or $Ordered.Count -eq 0) { return $false }
+  $best = $Ordered[0]
+  $secondScore = if ($Ordered.Count -gt 1) { [int]$Ordered[1].score } else { -999 }
+  $bestType = [string]$best.element.controlType
+  $strong = ([int]$best.score -ge 115) -and (
+    $bestType -eq 'ControlType.Edit' -or
+    [bool]$best.element.hasKeyboardFocus -or
+    [bool]$best.element.isKeyboardFocusable
+  )
+  $clearLead = ([int]$best.score - $secondScore) -ge 10 -or $Ordered.Count -eq 1
+  return $strong -and $clearLead
+}
+
 $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
 if ($null -eq $focused) {
   [ordered]@{ ok = $false; error = 'Windows UI Automation did not report a focused element.' } | ConvertTo-Json -Compress -Depth 10
@@ -177,10 +194,10 @@ if ($null -eq $focused) {
 $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 $current = $focused
 $ancestors = @()
-$candidates = @()
+$allCandidates = @()
 $searchDepth = 0
 
-while ($null -ne $current -and $searchDepth -lt 5) {
+while ($null -ne $current -and $searchDepth -lt 9) {
   $description = Describe-Element $current
   $directRead = Read-ElementText $current
   $ancestors += [ordered]@{
@@ -190,9 +207,10 @@ while ($null -ne $current -and $searchDepth -lt 5) {
     readableLength = if ($null -ne $directRead) { ([string]$directRead.text).Length } else { 0 }
   }
 
+  $scopeCandidates = @()
   if ($null -ne $directRead -and -not [string]::IsNullOrWhiteSpace([string]$directRead.text)) {
     $score = Score-Candidate $description $directRead $searchDepth
-    $candidates += [ordered]@{
+    $scopeCandidates += [ordered]@{
       score = [int]$score
       searchDepth = [int]$searchDepth
       element = $description
@@ -202,33 +220,19 @@ while ($null -ne $current -and $searchDepth -lt 5) {
     }
   }
 
-  # The Codex webview may expose keyboard focus only on its Pane host while the
-  # contenteditable composer is a descendant accessibility node.
-  $candidates += Inspect-Subtree $current $searchDepth
+  # Codex exposes keyboard focus on a webview Pane in some builds, and a title
+  # action can move focus into the view toolbar. Search each enclosing subtree
+  # until a strong, unambiguous editable descendant is found.
+  $scopeCandidates += Inspect-Subtree $current $searchDepth
+  $allCandidates += $scopeCandidates
 
-  if ($candidates.Count -gt 0) { break }
-  $current = $walker.GetParent($current)
-  $searchDepth += 1
-}
-
-$ordered = @($candidates | Sort-Object -Property @{Expression='score'; Descending=$true}, @{Expression='readableLength'; Descending=$false})
-$diagnostic = @()
-foreach ($candidate in ($ordered | Select-Object -First 20)) {
-  $diagnostic += Diagnostic-Candidate $candidate
-}
-
-if ($ordered.Count -gt 0) {
-  $best = $ordered[0]
-  $secondScore = if ($ordered.Count -gt 1) { [int]$ordered[1].score } else { -999 }
-  $bestType = [string]$best.element.controlType
-  $strong = ([int]$best.score -ge 100) -and (
-    $bestType -eq 'ControlType.Edit' -or
-    [bool]$best.element.hasKeyboardFocus -or
-    [bool]$best.element.isKeyboardFocusable
-  )
-  $clearLead = ([int]$best.score - $secondScore) -ge 10 -or $ordered.Count -eq 1
-
-  if ($strong -and $clearLead) {
+  $orderedScope = @($scopeCandidates | Sort-Object -Property @{Expression='score'; Descending=$true}, @{Expression='readableLength'; Descending=$false})
+  if (Test-StrongCandidate $orderedScope) {
+    $best = $orderedScope[0]
+    $diagnostic = @()
+    foreach ($candidate in ($orderedScope | Select-Object -First 20)) {
+      $diagnostic += Diagnostic-Candidate $candidate
+    }
     [ordered]@{
       ok = $true
       text = [string]$best.text
@@ -241,14 +245,24 @@ if ($ordered.Count -gt 0) {
     } | ConvertTo-Json -Compress -Depth 10
     exit 0
   }
+
+  if ([string]$description.controlType -eq 'ControlType.Window') { break }
+  $current = $walker.GetParent($current)
+  $searchDepth += 1
+}
+
+$ordered = @($allCandidates | Sort-Object -Property @{Expression='score'; Descending=$true}, @{Expression='readableLength'; Descending=$false})
+$diagnostic = @()
+foreach ($candidate in ($ordered | Select-Object -First 20)) {
+  $diagnostic += Diagnostic-Candidate $candidate
 }
 
 [ordered]@{
   ok = $false
   error = if ($ordered.Count -gt 0) {
-    'Windows UI Automation found text-bearing controls under the Codex pane, but could not identify the composer with enough confidence.'
+    'Windows UI Automation found text-bearing controls near the Codex view, but could not identify the composer with enough confidence.'
   } else {
-    'The focused Codex pane did not expose any readable descendant controls through Windows UI Automation.'
+    'The Codex view did not expose any readable controls through Windows UI Automation.'
   }
   focused = Describe-Element $focused
   candidates = $diagnostic
@@ -298,8 +312,8 @@ async function inspectFocusedControl() {
   ], {
     encoding: 'utf8',
     windowsHide: true,
-    timeout: 8000,
-    maxBuffer: 2 * 1024 * 1024,
+    timeout: 10000,
+    maxBuffer: 3 * 1024 * 1024,
   });
 
   const result = parseUiaInspection(stdout);
@@ -320,7 +334,7 @@ async function captureFocusedText() {
     ? ` Found ${result.candidates.length} readable candidate control(s); see Codex Scheduler output for details.`
     : '';
   const error = new Error(
-    `${result.error || 'No draft text was exposed by the focused control.'} Focused control: ${focused}.${candidateSummary}`,
+    `${result.error || 'No draft text was exposed by the Codex view.'} Focused control: ${focused}.${candidateSummary}`,
   );
   error.captureDiagnostics = result;
   throw error;
