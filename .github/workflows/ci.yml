@@ -17,6 +17,20 @@ jobs:
           node-version: 22
       - name: Test
         run: npm test
+      - name: Check overlay PowerShell syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path 'resources/codex-scheduler-overlay.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
       - name: Package VSIX
         run: npx -y @vscode/vsce package --out codex-scheduler.vsix
       - name: Upload VSIX
