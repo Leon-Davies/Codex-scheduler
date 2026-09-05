@@ -151,9 +151,6 @@ function Find-ComposerAnchor($Root) {
       if ($type -eq 'ControlType.Edit' -or $type -eq 'ControlType.Document') {
         if ($rect.width -lt 120 -or $rect.height -lt 24) { continue }
 
-        # Do not reject very wide editor controls. In fullscreen Codex the composer
-        # legitimately spans most of the VS Code window. Pair scoring against the
-        # actual Send button is a safer discriminator than width alone.
         $text = Read-ElementText $element
         $score = if ($type -eq 'ControlType.Edit') { 100 } else { 55 }
         if ($identity -match '(?i)prompt|message|ask|composer|input|textarea|codex|chat') { $score += 110 }
@@ -211,6 +208,93 @@ function Find-ComposerAnchor($Root) {
   return $bestPair
 }
 
+function Refresh-CachedAnchor($Anchor) {
+  if ($null -eq $Anchor) { return $null }
+  try {
+    if ([bool]$Anchor.button.element.Current.IsOffscreen -or [bool]$Anchor.editor.element.Current.IsOffscreen) {
+      return $null
+    }
+    $buttonRect = Get-Rect $Anchor.button.element
+    $editorRect = Get-Rect $Anchor.editor.element
+    if ($null -eq $buttonRect -or $null -eq $editorRect) { return $null }
+
+    return [ordered]@{
+      button = [ordered]@{
+        element = $Anchor.button.element
+        rect = $buttonRect
+        score = $Anchor.button.score
+        identity = $Anchor.button.identity
+        name = $Anchor.button.name
+      }
+      editor = [ordered]@{
+        element = $Anchor.editor.element
+        rect = $editorRect
+        score = $Anchor.editor.score
+        identity = $Anchor.editor.identity
+        text = $Anchor.editor.text
+      }
+      score = $Anchor.score
+    }
+  } catch {
+    return $null
+  }
+}
+
+function Get-ThreadTitleCandidates($Root, $Anchor) {
+  if ($null -eq $Root -or $null -eq $Anchor) { return @() }
+  $windowRect = Get-Rect $Root
+  $all = Get-Descendants $Root
+  if ($null -eq $windowRect -or $null -eq $all) { return @() }
+
+  $editorTop = [double]$Anchor.editor.rect.y
+  $headerBandBottom = [math]::Min(
+    $editorTop - 40,
+    $windowRect.y + [math]::Max(180, ($windowRect.height * 0.30))
+  )
+  $candidates = @()
+  $count = [math]::Min($all.Count, 3000)
+
+  for ($i = 0; $i -lt $count; $i++) {
+    try {
+      $element = $all.Item($i)
+      $current = $element.Current
+      if ([bool]$current.IsOffscreen) { continue }
+      $name = ([string]$current.Name).Trim()
+      if ([string]::IsNullOrWhiteSpace($name) -or $name.Length -lt 3 -or $name.Length -gt 160) { continue }
+      if ($name -match '^(?i:Chat|Codex|Claude Code|Work locally|Full access|Send|Submit|Schedule Codex prompt)$') { continue }
+      if ($name -match '^(?i:GPT-|GPT |Model |Screen Reader|WSL:)') { continue }
+
+      $type = [string]$current.ControlType.ProgrammaticName
+      if ($type -notin @('ControlType.Text', 'ControlType.Button', 'ControlType.Hyperlink', 'ControlType.TabItem')) { continue }
+      $rect = Get-Rect $element
+      if ($null -eq $rect) { continue }
+      if ($rect.y -lt ($windowRect.y + 18) -or $rect.y -gt $headerBandBottom) { continue }
+      if ($rect.width -lt 20 -or $rect.width -gt 760) { continue }
+
+      $score = 0
+      if ($type -eq 'ControlType.Text') { $score += 40 }
+      if ($rect.y -le ($windowRect.y + 170)) { $score += 80 }
+      elseif ($rect.y -le ($windowRect.y + 250)) { $score += 35 }
+      if ([math]::Abs($rect.x - $Anchor.editor.rect.x) -le 140) { $score += 65 }
+      if ($rect.x -ge ($windowRect.x + 10) -and $rect.x -le ($windowRect.x + ($windowRect.width * 0.55))) { $score += 30 }
+      if ($name -match '\s') { $score += 15 }
+
+      $candidates += [pscustomobject]@{
+        name = $name
+        score = [int]$score
+      }
+    } catch {}
+  }
+
+  return @(
+    $candidates |
+      Sort-Object score -Descending |
+      ForEach-Object { $_.name } |
+      Select-Object -Unique |
+      Select-Object -First 12
+  )
+}
+
 function Write-OverlayEvent([string]$Action) {
   try {
     $foreground = Get-ForegroundVsCodeRoot
@@ -233,16 +317,18 @@ function Write-OverlayEvent([string]$Action) {
     }
 
     $prompt = Read-ElementText $anchor.editor.element
+    $threadTitleCandidates = @(Get-ThreadTitleCandidates $root $anchor)
     $payload = [ordered]@{
       action = $Action
       prompt = [string]$prompt
+      threadTitleCandidates = $threadTitleCandidates
       capturedAt = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
       anchorScore = [int]$anchor.score
       sendName = [string]$anchor.button.name
       editorIdentity = [string]$anchor.editor.identity
     }
 
-    $json = $payload | ConvertTo-Json -Compress -Depth 5
+    $json = $payload | ConvertTo-Json -Compress -Depth 6
     [System.IO.File]::AppendAllText($EventPath, $json + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
   } catch {
     [System.Windows.Forms.MessageBox]::Show(
@@ -255,7 +341,9 @@ function Write-OverlayEvent([string]$Action) {
 }
 
 $script:lastVsCodeRoot = $null
+$script:lastRootHandle = 0
 $script:lastAnchor = $null
+$script:scanCounter = 0
 
 $form = New-Object System.Windows.Forms.Form
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::None
@@ -279,14 +367,14 @@ $button.Size = New-Object System.Drawing.Size(28, 28)
 $button.Text = [char]0x25F7
 $button.TextAlign = [System.Drawing.ContentAlignment]::MiddleCenter
 $button.Font = New-Object System.Drawing.Font('Segoe UI Symbol', 9, [System.Drawing.FontStyle]::Regular)
-$button.ForeColor = [System.Drawing.Color]::WhiteSmoke
-$button.BackColor = [System.Drawing.Color]::FromArgb(48, 48, 52)
+$button.ForeColor = [System.Drawing.Color]::White
+$button.BackColor = [System.Drawing.Color]::FromArgb(54, 54, 60)
 $button.UseVisualStyleBackColor = $false
 $button.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
 $button.FlatAppearance.BorderSize = 1
-$button.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(112, 112, 118)
-$button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(66, 66, 72)
-$button.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(78, 78, 84)
+$button.FlatAppearance.BorderColor = [System.Drawing.Color]::FromArgb(150, 150, 158)
+$button.FlatAppearance.MouseOverBackColor = [System.Drawing.Color]::FromArgb(72, 72, 80)
+$button.FlatAppearance.MouseDownBackColor = [System.Drawing.Color]::FromArgb(84, 84, 92)
 $button.Cursor = [System.Windows.Forms.Cursors]::Hand
 $button.TabStop = $false
 $button.Margin = New-Object System.Windows.Forms.Padding(0)
@@ -312,9 +400,6 @@ $timeItem.Text = 'Send at specific time...'
 $menu.Items.Add($resetItem) | Out-Null
 $menu.Items.Add($timeItem) | Out-Null
 
-# Open on mouse-down instead of Click. The overlay is its own top-level window,
-# and waiting for a full Click sequence proved unreliable when VS Code/overlay
-# foreground ownership changed between mouse-down and mouse-up.
 $button.Add_MouseDown({
   param($sender, $eventArgs)
   if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) {
@@ -325,10 +410,12 @@ $resetItem.Add_Click({ Write-OverlayEvent 'usageReset' })
 $timeItem.Add_Click({ Write-OverlayEvent 'atTime' })
 
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = 300
+$timer.Interval = 90
 $timer.Add_Tick({
   $foreground = Get-ForegroundVsCodeRoot
   if ($null -eq $foreground) {
+    # Intentional: this helper is TopMost, so hide it whenever VS Code is not the
+    # foreground application rather than leaving a floating clock over other apps.
     $form.Hide()
     return
   }
@@ -338,17 +425,36 @@ $timer.Add_Tick({
   }
 
   $root = $foreground.root
-  $anchor = Find-ComposerAnchor $root
+  $rootHandle = 0
+  try { $rootHandle = [int]$root.Current.NativeWindowHandle } catch {}
+  if ($script:lastRootHandle -ne 0 -and $rootHandle -ne 0 -and $rootHandle -ne $script:lastRootHandle) {
+    $script:lastAnchor = $null
+    $script:scanCounter = 99
+  }
+
+  $script:lastVsCodeRoot = $root
+  $script:lastRootHandle = $rootHandle
+  $script:scanCounter += 1
+
+  # During resize/fullscreen transitions, reuse the live UI Automation elements and
+  # read only their current bounding rectangles. A full descendant scan is much more
+  # expensive and was the source of the visible 300ms 'jump then settle' behavior.
+  $anchor = Refresh-CachedAnchor $script:lastAnchor
+  if ($null -eq $anchor -or $script:scanCounter -ge 7) {
+    $rescanned = Find-ComposerAnchor $root
+    $script:scanCounter = 0
+    if ($null -ne $rescanned) {
+      $anchor = $rescanned
+    }
+  }
+
   if ($null -eq $anchor) {
     $form.Hide()
-    $script:lastVsCodeRoot = $root
     $script:lastAnchor = $null
     return
   }
 
-  $script:lastVsCodeRoot = $root
   $script:lastAnchor = $anchor
-
   $send = $anchor.button.rect
   $targetSize = [int][math]::Round([math]::Max(24, [math]::Min(30, $send.height - 1)))
   if ($targetSize -ne $form.ClientSize.Width -or $targetSize -ne $form.ClientSize.Height) {
@@ -365,7 +471,10 @@ $timer.Add_Tick({
   $gap = 7
   $x = [int][math]::Round($send.centerX - ($form.ClientSize.Width / 2))
   $y = [int][math]::Round($send.y - $form.ClientSize.Height - $gap)
-  $form.Location = New-Object System.Drawing.Point($x, $y)
+  $target = New-Object System.Drawing.Point($x, $y)
+  if ($form.Location.X -ne $target.X -or $form.Location.Y -ne $target.Y) {
+    $form.Location = $target
+  }
 
   if (-not $form.Visible) {
     $form.Show()
