@@ -5,6 +5,7 @@ const { CodexService } = require('./codex/service');
 const { discoverCodexCandidates, discoverCodexExecutable } = require('./codex/executableDiscovery');
 const { summarizeRateLimits } = require('./codex/rateLimits');
 const { captureFocusedText } = require('./platform/windowsDraftCapture');
+const { ComposerOverlay, canUseComposerOverlay } = require('./platform/windowsComposerOverlay');
 const { JobStore } = require('./scheduler/jobStore');
 const { isPending } = require('./scheduler/jobs');
 const { Scheduler } = require('./scheduler/scheduler');
@@ -51,6 +52,7 @@ function activate(context) {
   const store = new JobStore(context.globalState);
   const codex = new CodexService({ vscode, output });
   let statusBar;
+  let composerOverlay = null;
 
   const updateStatusBar = () => {
     if (!statusBar) return;
@@ -81,7 +83,6 @@ function activate(context) {
   statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 90);
   statusBar.name = 'Codex Scheduler';
   statusBar.command = 'codexScheduler.scheduleCurrentDraft';
-  statusBar.show();
   context.subscriptions.push(statusBar, output);
 
   const commonScheduleArgs = {
@@ -98,8 +99,6 @@ function activate(context) {
         ...commonScheduleArgs,
         triggerType,
         allowClipboardFallback: false,
-        // Keep the preview for this qualification build. Once title-bar capture is
-        // proven, this confirmation can be removed for the one-click production UX.
         confirmCapturedPrompt: true,
       });
     } catch (error) {
@@ -109,6 +108,31 @@ function activate(context) {
         output.appendLine(JSON.stringify(error.captureDiagnostics, null, 2));
         output.show(true);
       }
+      vscode.window.showErrorMessage(`Codex Scheduler: ${error.message}`);
+    }
+  };
+
+  const runOverlaySchedule = async (event) => {
+    const triggerType = event?.action;
+    if (!['usageReset', 'atTime'].includes(triggerType)) {
+      output.appendLine(`[overlay] ignored unknown action ${JSON.stringify(triggerType)}`);
+      return;
+    }
+
+    try {
+      const prompt = String(event?.prompt || '');
+      if (!prompt.trim()) {
+        vscode.window.showWarningMessage('Codex Scheduler found the composer but it was empty. Type a prompt first, then use the schedule button.');
+        return;
+      }
+      await schedulePrompt({
+        ...commonScheduleArgs,
+        prompt,
+        triggerType,
+        confirmCapturedPrompt: true,
+      });
+    } catch (error) {
+      output.appendLine(`[schedule overlay/${triggerType}] ${error.stack || error.message}`);
       vscode.window.showErrorMessage(`Codex Scheduler: ${error.message}`);
     }
   };
@@ -160,9 +184,34 @@ function activate(context) {
     }),
 
     vscode.commands.registerCommand('codexScheduler.diagnose', async () => {
-      await diagnose({ vscode, codex, output });
+      await diagnose({ vscode, codex, output, composerOverlay });
     }),
   );
+
+  const overlayEnabled = vscode.workspace
+    .getConfiguration('codexScheduler')
+    .get('composerOverlay.enabled', true);
+  let overlayStarted = false;
+  if (overlayEnabled && canUseComposerOverlay()) {
+    try {
+      composerOverlay = new ComposerOverlay({
+        context,
+        output,
+        onAction: runOverlaySchedule,
+      });
+      overlayStarted = composerOverlay.start();
+      context.subscriptions.push(composerOverlay);
+    } catch (error) {
+      output.appendLine(`[overlay] failed to start: ${error.stack || error.message}`);
+    }
+  }
+
+  if (!overlayStarted) {
+    statusBar.show();
+  } else {
+    statusBar.hide();
+    output.appendLine('[overlay] composer-adjacent schedule button enabled; status-bar fallback hidden.');
+  }
 
   void recoverInterruptedJobs(store, output).then(() => {
     updateStatusBar();
@@ -261,7 +310,7 @@ function statusIcon(status) {
   }
 }
 
-async function diagnose({ vscode, codex, output }) {
+async function diagnose({ vscode, codex, output, composerOverlay }) {
   output.clear();
   output.show(true);
   output.appendLine('Codex Scheduler diagnostics');
@@ -269,6 +318,8 @@ async function diagnose({ vscode, codex, output }) {
   output.appendLine(`Platform: ${process.platform} ${process.arch}`);
   output.appendLine(`VS Code: ${vscode.version}`);
   output.appendLine(`Workspace: ${codex.getWorkspaceCwd() || '(none)'}`);
+  output.appendLine(`Composer overlay supported: ${canUseComposerOverlay() ? 'yes' : 'no'}`);
+  output.appendLine(`Composer overlay process: ${composerOverlay?.child ? 'running' : 'not running'}`);
 
   const official = vscode.extensions.getExtension('openai.chatgpt');
   output.appendLine(`Official Codex extension: ${official ? `${official.packageJSON.version || 'installed'} at ${official.extensionPath}` : 'not found'}`);
