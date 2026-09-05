@@ -29,6 +29,8 @@ Current capabilities include:
 - duplicate-send protection;
 - UI Automation draft capture;
 - a composer-adjacent Schedule button for Windows/WSL;
-- automatic current-thread matching when the visible title can be resolved uniquely.
+- automatic current-thread matching when the visible title can be resolved uniquely;
+- cached geometry tracking so the overlay follows resize/fullscreen transitions smoothly;
+- automatic hiding while VS Code is not foreground, so the TopMost helper never floats over unrelated applications.
 
 V0 currently requires VS Code and the machine to remain running for timers to fire.
