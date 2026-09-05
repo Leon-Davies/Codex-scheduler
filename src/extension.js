@@ -92,6 +92,27 @@ function activate(context) {
     onJobsChanged: updateStatusBar,
   };
 
+  const runTitleSchedule = async (triggerType) => {
+    try {
+      await scheduleCurrentDraft({
+        ...commonScheduleArgs,
+        triggerType,
+        allowClipboardFallback: false,
+        // Keep the preview for this qualification build. Once title-bar capture is
+        // proven, this confirmation can be removed for the one-click production UX.
+        confirmCapturedPrompt: true,
+      });
+    } catch (error) {
+      output.appendLine(`[schedule title/${triggerType}] ${error.stack || error.message}`);
+      if (error.captureDiagnostics) {
+        output.appendLine('[schedule title] accessibility diagnostics:');
+        output.appendLine(JSON.stringify(error.captureDiagnostics, null, 2));
+        output.show(true);
+      }
+      vscode.window.showErrorMessage(`Codex Scheduler: ${error.message}`);
+    }
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand('codexScheduler.scheduleCurrentDraft', async () => {
       try {
@@ -100,6 +121,14 @@ function activate(context) {
         output.appendLine(`[schedule] ${error.stack || error.message}`);
         vscode.window.showErrorMessage(`Codex Scheduler: ${error.message}`);
       }
+    }),
+
+    vscode.commands.registerCommand('codexScheduler.scheduleAtReset', async () => {
+      await runTitleSchedule('usageReset');
+    }),
+
+    vscode.commands.registerCommand('codexScheduler.scheduleAtTime', async () => {
+      await runTitleSchedule('atTime');
     }),
 
     vscode.commands.registerCommand('codexScheduler.scheduleClipboard', async () => {
