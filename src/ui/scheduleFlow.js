@@ -74,6 +74,54 @@ async function confirmPrompt(vscode, prompt) {
   return choice?.value || null;
 }
 
+async function buildUsageResetTiming(vscode, codex, suppliedLimits = null) {
+  let rateLimits = suppliedLimits;
+  if (!rateLimits) {
+    try {
+      rateLimits = await codex.getRateLimits();
+    } catch {
+      rateLimits = null;
+    }
+  }
+
+  const safetySeconds = vscode.workspace
+    .getConfiguration('codexScheduler')
+    .get('resetSafetySeconds', 30);
+  const resetMs = getNextResetMs(rateLimits);
+
+  return {
+    trigger: { type: 'usageReset' },
+    nextAttemptAt: resetMs
+      ? Math.max(Date.now() + 15_000, resetMs + Math.max(0, safetySeconds) * 1000)
+      : Date.now() + 30_000,
+  };
+}
+
+async function buildAtTimeTiming(vscode) {
+  const entered = await vscode.window.showInputBox({
+    title: 'Codex Scheduler — Send at a specific time',
+    prompt: 'Enter local time (HH:mm) or local date/time (YYYY-MM-DD HH:mm)',
+    placeHolder: '03:15',
+    validateInput: (value) => {
+      const parsed = parseLocalScheduleTime(value);
+      if (!parsed) return 'Enter a valid time such as 03:15 or 2026-09-05 03:15.';
+      if (parsed.getTime() <= Date.now()) return 'The selected date/time is in the past.';
+      return null;
+    },
+  });
+  if (!entered) {
+    return null;
+  }
+  const when = parseLocalScheduleTime(entered);
+  if (!when || when.getTime() <= Date.now()) {
+    return null;
+  }
+  return {
+    trigger: { type: 'atTime', at: when.getTime() },
+    nextAttemptAt: when.getTime(),
+  };
+}
+
 async function chooseTrigger(vscode, codex) {
   let resetDetail = 'Codex usage will be checked before sending.';
   let rateLimits = null;
@@ -108,60 +156,49 @@ async function chooseTrigger(vscode, codex) {
   if (!choice) {
     return null;
   }
-
   if (choice.value === 'usageReset') {
-    const safetySeconds = vscode.workspace
-      .getConfiguration('codexScheduler')
-      .get('resetSafetySeconds', 30);
-    const resetMs = getNextResetMs(choice.rateLimits);
-    return {
-      trigger: { type: 'usageReset' },
-      nextAttemptAt: resetMs
-        ? Math.max(Date.now() + 15_000, resetMs + Math.max(0, safetySeconds) * 1000)
-        : Date.now() + 30_000,
-    };
+    return buildUsageResetTiming(vscode, codex, choice.rateLimits);
   }
-
-  const entered = await vscode.window.showInputBox({
-    title: 'Codex Scheduler — Send at a specific time',
-    prompt: 'Enter local time (HH:mm) or local date/time (YYYY-MM-DD HH:mm)',
-    placeHolder: '03:15',
-    validateInput: (value) => {
-      const parsed = parseLocalScheduleTime(value);
-      if (!parsed) return 'Enter a valid time such as 03:15 or 2026-09-05 03:15.';
-      if (parsed.getTime() <= Date.now()) return 'The selected date/time is in the past.';
-      return null;
-    },
-  });
-  if (!entered) {
-    return null;
-  }
-  const when = parseLocalScheduleTime(entered);
-  if (!when || when.getTime() <= Date.now()) {
-    return null;
-  }
-  return {
-    trigger: { type: 'atTime', at: when.getTime() },
-    nextAttemptAt: when.getTime(),
-  };
+  return buildAtTimeTiming(vscode);
 }
 
-async function schedulePrompt({ vscode, prompt, codex, store, workspaceState, onJobsChanged }) {
+async function timingForTrigger(vscode, codex, triggerType) {
+  if (triggerType === 'usageReset') {
+    return buildUsageResetTiming(vscode, codex);
+  }
+  if (triggerType === 'atTime') {
+    return buildAtTimeTiming(vscode);
+  }
+  return chooseTrigger(vscode, codex);
+}
+
+async function schedulePrompt({
+  vscode,
+  prompt,
+  codex,
+  store,
+  workspaceState,
+  onJobsChanged,
+  triggerType = null,
+  confirmCapturedPrompt = true,
+}) {
   let finalPrompt = String(prompt || '');
   if (!finalPrompt.trim()) {
     vscode.window.showWarningMessage('Codex Scheduler did not find any prompt text to schedule.');
     return null;
   }
 
-  const confirmation = await confirmPrompt(vscode, finalPrompt);
-  if (!confirmation) {
-    return null;
-  }
-  if (confirmation === 'clipboard') {
-    finalPrompt = await vscode.env.clipboard.readText();
-    if (!finalPrompt.trim()) {
-      vscode.window.showWarningMessage('The clipboard is empty.');
+  if (confirmCapturedPrompt) {
+    const confirmation = await confirmPrompt(vscode, finalPrompt);
+    if (!confirmation) {
       return null;
+    }
+    if (confirmation === 'clipboard') {
+      finalPrompt = await vscode.env.clipboard.readText();
+      if (!finalPrompt.trim()) {
+        vscode.window.showWarningMessage('The clipboard is empty.');
+        return null;
+      }
     }
   }
 
@@ -169,7 +206,7 @@ async function schedulePrompt({ vscode, prompt, codex, store, workspaceState, on
   if (!thread) {
     return null;
   }
-  const timing = await chooseTrigger(vscode, codex);
+  const timing = await timingForTrigger(vscode, codex, triggerType);
   if (!timing) {
     return null;
   }
@@ -197,6 +234,9 @@ async function scheduleCurrentDraft(args) {
   try {
     prompt = await captureFocusedText(args.vscode);
   } catch (error) {
+    if (args.allowClipboardFallback === false) {
+      throw error;
+    }
     const fallback = await args.vscode.window.showWarningMessage(
       error.message,
       'Schedule Clipboard',
@@ -227,10 +267,13 @@ function rateLimitSummaryText(response) {
 }
 
 module.exports = {
+  buildAtTimeTiming,
+  buildUsageResetTiming,
   chooseThread,
   chooseTrigger,
   preview,
   rateLimitSummaryText,
   scheduleCurrentDraft,
   schedulePrompt,
+  timingForTrigger,
 };
