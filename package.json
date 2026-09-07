@@ -1,0 +1,153 @@
+{
+  "name": "codex-scheduler",
+  "displayName": "Codex Scheduler",
+  "description": "Schedule prompts into existing OpenAI Codex conversations from VS Code.",
+  "version": "0.0.14",
+  "publisher": "leon-davies",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "codex",
+    "scheduler",
+    "openai"
+  ],
+  "main": "./src/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:codexScheduler.scheduleCurrentDraft",
+    "onCommand:codexScheduler.scheduleAtReset",
+    "onCommand:codexScheduler.scheduleAtTime",
+    "onCommand:codexScheduler.scheduleClipboard",
+    "onCommand:codexScheduler.testDraftCapture",
+    "onCommand:codexScheduler.manageScheduled",
+    "onCommand:codexScheduler.diagnose",
+    "onCommand:codexScheduler.showUsage"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codexScheduler.scheduleCurrentDraft",
+        "title": "Codex Scheduler: Schedule Current Draft",
+        "icon": "$(clock)"
+      },
+      {
+        "command": "codexScheduler.scheduleAtReset",
+        "title": "Send when quota resets",
+        "category": "Codex Scheduler",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "codexScheduler.scheduleAtTime",
+        "title": "Send at specific time…",
+        "category": "Codex Scheduler",
+        "icon": "$(clock)"
+      },
+      {
+        "command": "codexScheduler.scheduleClipboard",
+        "title": "Codex Scheduler: Schedule Prompt from Clipboard"
+      },
+      {
+        "command": "codexScheduler.testDraftCapture",
+        "title": "Codex Scheduler: Test Draft Capture (No Send)"
+      },
+      {
+        "command": "codexScheduler.manageScheduled",
+        "title": "Manage scheduled prompts",
+        "category": "Codex Scheduler",
+        "icon": "$(list-unordered)"
+      },
+      {
+        "command": "codexScheduler.diagnose",
+        "title": "Codex Scheduler: Diagnose Codex Integration"
+      },
+      {
+        "command": "codexScheduler.showUsage",
+        "title": "Codex Scheduler: Show Codex Usage"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "codexScheduler.scheduleMenu",
+        "label": "Schedule",
+        "icon": "$(clock)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "submenu": "codexScheduler.scheduleMenu",
+          "when": "view == chatgpt.sidebarView",
+          "group": "navigation@95"
+        }
+      ],
+      "codexScheduler.scheduleMenu": [
+        {
+          "command": "codexScheduler.scheduleAtReset",
+          "group": "1_schedule@1"
+        },
+        {
+          "command": "codexScheduler.scheduleAtTime",
+          "group": "1_schedule@2"
+        },
+        {
+          "command": "codexScheduler.manageScheduled",
+          "group": "2_manage@1"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "codexScheduler.scheduleCurrentDraft",
+        "key": "ctrl+alt+s",
+        "when": "isWindows || remoteName == wsl"
+      },
+      {
+        "command": "codexScheduler.testDraftCapture",
+        "key": "ctrl+alt+shift+s",
+        "when": "isWindows || remoteName == wsl"
+      }
+    ],
+    "configuration": {
+      "title": "Codex Scheduler",
+      "properties": {
+        "codexScheduler.codexCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to the Codex executable. Leave blank to prefer the runtime bundled with the official OpenAI Codex extension, then fall back to Codex on PATH."
+        },
+        "codexScheduler.pollIntervalSeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 10,
+          "maximum": 300,
+          "description": "How often queued jobs are checked while VS Code is running."
+        },
+        "codexScheduler.resetSafetySeconds": {
+          "type": "number",
+          "default": 30,
+          "minimum": 0,
+          "maximum": 600,
+          "description": "Safety delay after a reported Codex reset timestamp before the first send attempt."
+        },
+        "codexScheduler.composerOverlay.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the Windows companion Schedule button beside the visible Codex send control when using native Windows or VS Code Remote/WSL."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test",
+    "package": "npx -y @vscode/vsce package --out codex-scheduler.vsix"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Leon-Davies/Codex-scheduler.git"
+  }
+}
