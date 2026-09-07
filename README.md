@@ -1,43 +1,45 @@
 # Codex Scheduler
 
-A small Windows/WSL companion extension for the official OpenAI Codex VS Code extension.
+Schedule a prompt that is already typed in the official OpenAI Codex VS Code chat.
 
-It lets you leave a prompt typed in the existing Codex composer and schedule that exact prompt for later without replacing the Codex UI or conversation history.
+![Codex Scheduler button](docs/scheduler-button.png)
 
-## Intended workflow
+## What it does
 
-1. Type the prompt normally in Codex.
-2. Click the small clock button above Codex's Send button.
-3. Choose either:
-   - **Send when quota resets** to arm a one-shot reset send.
-   - **Send at specific time...** to enter `HH:MM` or a short delay such as `in 20m` / `in 2h`.
-4. The scheduler later adds the prompt to the same Codex conversation through Codex's native queued-turn API.
+- Send when your Codex quota resets
+- Send at a specific time
+- Send after a delay such as `in 20m` or `in 2h`
+- Keeps the prompt in the same Codex conversation
 
-## Current behavior
+![Schedule options](docs/scheduler-menu.png)
 
-- **Send when quota resets** is one-shot: disabled → enabled → prompt queued once after the reset/availability check → disabled again automatically.
-- **Send at specific time...** supports clock times and relative delays.
-- Existing Codex conversations are targeted through Codex's native queued-turn API.
-- A brand-new unsent Codex chat may not yet have a persisted thread target. Send one normal message first, then schedule subsequent prompts.
-- The scheduler fails closed if it cannot identify the visible Codex conversation safely.
+## Install
 
-## Development status
+1. Install the official OpenAI Codex VS Code extension.
+2. Clone this repo.
+3. Run:
 
-Windows + VS Code Remote/WSL is the primary tested environment.
+```bash
+npm install
+npm run package
+```
 
-Confirmed so far:
+4. In VS Code, open **Extensions** → `...` → **Install from VSIX...**
+5. Select `codex-scheduler.vsix`.
 
-- real Codex quota/reset reads;
-- existing Codex thread discovery;
-- native durable queued-turn delivery;
-- exact draft capture from the visible Codex composer;
-- automatic current-thread matching for established chats;
-- owner-tested end-to-end timed delivery into the same existing Codex conversation;
-- one-shot reset jobs become terminal immediately after successful queue submission;
-- persistent jobs across VS Code restarts;
-- duplicate-send protection;
-- composer-adjacent Schedule button for Windows/WSL;
-- cached geometry tracking across resize/fullscreen transitions;
-- automatic hiding while VS Code is not foreground.
+## Use
 
-V0 currently requires VS Code and the machine to remain running/awake for timers to fire.
+1. Open an existing Codex conversation.
+2. Type your next prompt, but do not send it.
+3. Click the clock button above Codex's Send button.
+4. Choose **Send when quota resets** or **Send at specific time...**.
+
+For scheduled time, enter `HH:MM` in 24-hour format or a delay such as `in 20m` or `in 2h`.
+
+![Send at time](docs/schedule-time.png)
+
+## Notes
+
+- In a brand-new chat, send one normal message first before scheduling the next prompt.
+- **Send when quota resets** is one-shot. It turns off after the scheduled prompt is sent.
+- VS Code and the computer currently need to stay awake for scheduled prompts to run.
