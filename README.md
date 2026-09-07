@@ -2,7 +2,7 @@
 
 Schedule a prompt that is already typed in the official OpenAI Codex VS Code chat.
 
-![Codex Scheduler button](docs/scheduler-button.png)
+![Codex Scheduler button](docs/ui-scheduler-button.png)
 
 ## What it does
 
@@ -11,7 +11,7 @@ Schedule a prompt that is already typed in the official OpenAI Codex VS Code cha
 - Send after a delay such as `in 20m` or `in 2h`
 - Keeps the prompt in the same Codex conversation
 
-![Schedule options](docs/scheduler-menu.png)
+![Schedule options](docs/ui-scheduler-menu.png)
 
 ## Install
 
@@ -36,7 +36,7 @@ npm run package
 
 For scheduled time, enter `HH:MM` in 24-hour format or a delay such as `in 20m` or `in 2h`.
 
-![Send at time](docs/schedule-time.png)
+![Send at time](docs/ui-schedule-time.png)
 
 ## Notes
 
